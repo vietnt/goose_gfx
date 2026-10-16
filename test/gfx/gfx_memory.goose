@@ -1,8 +1,8 @@
 // memory_info() reports what SDL can tell of the GPU's memory. The values
 // differ from GPU to GPU, so this checks what holds on every one: an
 // architecture and a kind from the MEMORY_ constants or 0, and bytes exactly
-// when there is a kind; and that Vulkan and Direct3D 12 give an amount.
-// SDL's Metal backend tells nothing yet (gfx_memory.metal.out).
+// when there is a kind; and that Vulkan, Direct3D 12 and Metal give an
+// amount.
 import gfx from "../..";
 import std;
 import os;
