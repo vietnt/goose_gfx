@@ -82,6 +82,7 @@ typedef struct {
     int32_t wrap_u, wrap_v, wrap_w;
     float max_anisotropy;       /* 1 or less: off */
     int32_t compare;            /* a COMPARE_*, for a shadow sampler; 0: none */
+    float min_lod, max_lod;     /* the mip levels sampling may reach, clamped to the texture's */
 } gs_gfx_sampler_desc;
 
 typedef struct {

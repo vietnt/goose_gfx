@@ -1,0 +1,10 @@
+texture() at 4:1, default range: mip 2
+texture() at 1:1, default range: mip 0
+textureLod(2), default range: mip 2
+textureLod(2), max_lod 0: mip 0
+texture() at 4:1, max_lod 0: mip 0
+textureLod(0), min_lod 2: mip 2
+texture() at 4:1, lod 1 to 1: mip 1
+textureGrad 4 texels at 1:1, array layer 2: mip 2
+textureGrad 4 texels at 1:1, layer 1, max_lod 1: mip 1
+texture() at 1:1, array layer 1: mip 0

@@ -590,6 +590,11 @@ gs_gfx_sampler gs_gfx_create_sampler(const gs_gfx_sampler_desc *desc) {
         gfx_misuse("a sampler with filters, wraps or a compare that are not gfx's constants");
         return h;
     }
+    if (!(d->min_lod >= 0.0f && d->max_lod >= d->min_lod)) {
+        gfx_misuse("a sampler with min_lod %g and max_lod %g: 0 <= min_lod <= max_lod",
+                   (double)d->min_lod, (double)d->max_lod);
+        return h;
+    }
     SDL_GPUSamplerCreateInfo ci;
     SDL_zero(ci);
     ci.min_filter = (SDL_GPUFilter)d->min_filter;
@@ -602,8 +607,8 @@ gs_gfx_sampler gs_gfx_create_sampler(const gs_gfx_sampler_desc *desc) {
     ci.enable_anisotropy = d->max_anisotropy > 1.0f;
     ci.compare_op = (SDL_GPUCompareOp)d->compare;
     ci.enable_compare = d->compare != 0;
-    ci.min_lod = 0.0f;
-    ci.max_lod = 1000.0f;
+    ci.min_lod = d->min_lod;
+    ci.max_lod = d->max_lod;
     SDL_GPUSampler *smp = SDL_CreateGPUSampler(gfx.dev, &ci);
     if (!smp) {
         gfx_sdl_fail("creating a sampler");

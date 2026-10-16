@@ -229,6 +229,10 @@ struct SamplerDesc {
     wrap_w: i32 = 0,
     max_anisotropy: f32 = 1.0,
     compare: i32 = 0,       // a COMPARE_*, for a shadow sampler
+    // The mip levels sampling may reach, after the level of detail is
+    // worked out: max_lod 0 keeps to the top mip whatever the texture has.
+    min_lod: f32 = 0.0,
+    max_lod: f32 = 1000.0,
 }
 
 // A pipeline is not tied to the formats it draws into: it is made for the
