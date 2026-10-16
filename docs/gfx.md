@@ -238,9 +238,11 @@ fields in the same order, and the same constant values.
   origin reaches the shader from a vertex buffer, so the program's pushed
   uniforms are untouched. Depth textures, the screen's
   included, are created sampled where the device can sample their format;
-  where it cannot, the read fails with the reason in `error()`. Mip 0 of a
-  2D texture is what reads back; another mip, a layer, a cube or a
-  multisampled depth texture is a misuse.
+  where it cannot, the read fails with the reason in `error()`. Any mip of
+  a 2D texture, an array layer or a cube face reads back, a cube face
+  sampled at its texels' centres; multisampled depth is a misuse (3D
+  textures cannot be depth targets in SDL). A pass draws into a depth
+  target's mip and layer from `PassDesc.depth_mip` and `depth_layer`.
 * **Multisampled color textures** read back resolved, their samples
   averaged as a pass's resolve target gets them: the read records a render
   pass that loads the texture and resolves it into a texture of its own,
@@ -358,11 +360,10 @@ until CI or a Mac runs them.
   function's slice parameter produces invalid C at `-O1`/`-O2` (bind it to a
   local first); and a struct field's default cannot name a global constant
   (the gfx descriptions spell their defaults as numbers).
-* **API**: gamepads and audio (SDL has them all), depth readback of a mip
-  above 0, an array layer, a cube face or a 3D texture, checking uniform
-  block member offsets rather than size alone, and readback forms that
-  return a fresh array of an explicit element type (`read_buffer<f32>(b, n)`)
-  beside the ones that append to an out-array.
+* **API**: gamepads and audio (SDL has them all), checking uniform block
+  member offsets rather than size alone, and readback forms that return a
+  fresh array of an explicit element type (`read_buffer<f32>(b, n)`) beside
+  the ones that append to an out-array.
 * **Blocked outside goose_gfx.** Compressed-texture downloads on Direct3D
   12 (above) need SDL itself to change. GPU time (`gpu_time()`), GPU memory
   (`memory_info()`) and copies from a buffer into a texture on the GPU

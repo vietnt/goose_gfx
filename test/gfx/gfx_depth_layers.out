@@ -1,0 +1,14 @@
+2D mip 0, first row: 0.75 1.0 1.0 1.0
+2D mip 1: 0.375 0.5 0.5 0.5
+2D mip 2: 0.125
+2D mip 1 at 1,0: 0.5
+array layer 0: mip 0 0.125 0.25 0.25 0.25, mip 1 0.0625
+array layer 1: mip 0 0.25 0.5 0.5 0.5, mip 1 0.125
+array layer 2: mip 0 0.375 0.75 0.75 0.75, mip 1 0.1875
+cube face 0: mip 0 0.0625 0.5 0.5 0.5, mip 1 0.875
+cube face 1: mip 0 0.125 0.5625 0.5625 0.5625, mip 1 0.890625
+cube face 2: mip 0 0.1875 0.625 0.625 0.625, mip 1 0.90625
+cube face 3: mip 0 0.25 0.6875 0.6875 0.6875, mip 1 0.921875
+cube face 4: mip 0 0.3125 0.75 0.75 0.75, mip 1 0.9375
+cube face 5: mip 0 0.375 0.8125 0.8125 0.8125, mip 1 0.953125
+cube face 3 at 1,1: 0.6875

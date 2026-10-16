@@ -649,7 +649,8 @@ static bool gfx_depth_unreadable(gfx_texture_slot *s, const SDL_GPUTextureRegion
     if (!(s->usage & SDL_GPU_TEXTUREUSAGE_SAMPLER))
         return gfx_fail("%s: this device cannot sample depth format %d, so it cannot read it back",
                         what, s->desc.format);
-    return gfx_misuse("%s: a depth texture is read back from mip 0 of a 2D texture", what);
+    return gfx_misuse("%s: a depth texture is read back from a 2D texture, an array layer or a "
+                      "cube face, not multisampled", what);
 }
 
 /* Records the download of `region` of `t`; `len`, when not -1, is the

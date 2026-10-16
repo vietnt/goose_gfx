@@ -130,6 +130,7 @@ typedef struct {
     uint8_t clear_stencil, stencil_value;
     uint8_t clear_each;              /* color[i] clears to color_values[i], not color_value */
     gs_gfx_float4 color_values[4];
+    int32_t depth_layer, depth_mip;  /* of the depth target */
 } gs_gfx_pass_desc;
 
 #pragma pack(pop)

@@ -81,15 +81,27 @@ uint8_t gs_gfx_begin_pass(const gs_gfx_pass_desc *d) {
         if (!s) return 0;
         if (!(s->usage & SDL_GPU_TEXTUREUSAGE_DEPTH_STENCIL_TARGET))
             return gfx_misuse("begin_pass: the depth target was not created with DEPTH_TARGET");
-        if (t.ncolor && ((uint32_t)s->desc.width != w || (uint32_t)s->desc.height != h ||
-                         s->desc.samples != samples))
-            return gfx_misuse("begin_pass: the depth target is %d x %d with %d sample(s), the "
-                              "color targets %u x %u with %d", s->desc.width, s->desc.height,
-                              s->desc.samples, w, h, samples);
-        w = (uint32_t)s->desc.width;
-        h = (uint32_t)s->desc.height;
+        /* SDL takes a depth target's mip and layer as bytes. */
+        int32_t layers = s->desc.kind == GS_GFX_TEXTURE_CUBE ? 6
+                       : s->desc.kind == GS_GFX_TEXTURE_2D_ARRAY ? s->desc.depth : 1;
+        if (d->depth_mip < 0 || d->depth_mip >= s->desc.mips || d->depth_layer < 0 ||
+            d->depth_layer >= layers || d->depth_layer > 255)
+            return gfx_misuse("begin_pass: the depth target has no mip %d, layer %d", d->depth_mip,
+                              d->depth_layer);
+        uint32_t dw = (uint32_t)s->desc.width >> d->depth_mip;
+        uint32_t dh = (uint32_t)s->desc.height >> d->depth_mip;
+        dw = dw ? dw : 1;
+        dh = dh ? dh : 1;
+        if (t.ncolor && (dw != w || dh != h || s->desc.samples != samples))
+            return gfx_misuse("begin_pass: the depth target is %u x %u with %d sample(s), the "
+                              "color targets %u x %u with %d", dw, dh, s->desc.samples, w, h,
+                              samples);
+        w = dw;
+        h = dh;
         samples = s->desc.samples;
         dt.texture = s->tex;
+        dt.mip_level = (Uint8)d->depth_mip;
+        dt.layer = (Uint8)d->depth_layer;
         dt.clear_depth = d->depth_value;
         dt.load_op = d->clear_depth ? SDL_GPU_LOADOP_CLEAR : SDL_GPU_LOADOP_LOAD;
         dt.store_op = SDL_GPU_STOREOP_STORE;

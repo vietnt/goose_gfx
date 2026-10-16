@@ -403,6 +403,8 @@ struct PassDesc {
     stencil_value: u8 = 0,
     clear_each: bool = false,                   // color[i] clears to color_values[i], not color_value
     color_values: float4[4] = [float4 { 0.0, 0.0, 0.0, 1.0 }; 4],
+    depth_layer: i32 = 0,                       // of the depth target: an array layer, a cube face
+    depth_mip: i32 = 0,
 }
 
 // --- device, window and frames -----------------------------------------------
@@ -738,8 +740,9 @@ fn copy_texture(src: Texture, dst: Texture) -> bool {
 extern "gs_gfx_read_texture" fn read_texture_into(t: Texture, region: const Region&,
                                                   out: u8[:]) -> bool;
 // A depth texture reads back as one f32 a texel, D16 and D24 normalized to
-// 0..1, from mip 0 of a 2D texture: SDL_GPU cannot download depth on every
-// backend, so it is drawn into an R32F target first. A multisampled color
+// 0..1, from any mip of a 2D texture, an array layer or a cube face: SDL_GPU
+// cannot download depth on every backend, so it is drawn into an R32F
+// target first. A multisampled color
 // texture reads back resolved, as its resolve target would get it.
 fn read_texture(t: Texture, region: Region, out: u8[:]) -> bool {
     let target = depth_copy(t, region, out.len);
@@ -756,56 +759,87 @@ fn is_depth(format: i32) -> bool {
 }
 
 // What reading depth back keeps: made the first time, and again after gfx is
-// opened again.
-struct DepthReader { opened: i64, pipeline: Pipeline, sampler: Sampler }
-var depth_reader = DepthReader { 0, Pipeline { 0 }, Sampler { 0 } };
+// opened again. A pipeline for each kind of texture: 2D, array, cube.
+struct DepthReader { opened: i64, pipelines: Pipeline[3], sampler: Sampler }
+var depth_reader = DepthReader { 0, [Pipeline { 0 }; 3], Sampler { 0 } };
 
 // An R32F texture holding `region` of depth texture `t`, drawn into it in
 // the command buffer being recorded, to be read as `bytes` bytes (-1: any);
-// Texture { 0 } when `t` is not a depth
-// texture this can read, which read_texture_into then reports. The region's
-// origin comes from a vertex buffer, not as uniforms, so the uniforms the
-// program pushed stay as they were: vertex buffer 0, the same at each of the
-// triangle's vertices, since a draw needs buffer 0 bound on Vulkan.
+// Texture { 0 } when `t` is not a depth texture this can read, which
+// read_texture_into then reports. Any mip of a 2D texture, an array layer or
+// a cube face. The region's origin, layer and mip come from a vertex buffer,
+// not as uniforms, so the uniforms the program pushed stay as they were:
+// vertex buffer 0, the same at each of the triangle's vertices, since a draw
+// needs buffer 0 bound on Vulkan. A cube face is sampled at its texels'
+// centres, the directions that pick exactly those texels.
 fn depth_copy(t: Texture, region: Region, bytes: i64) -> Texture {
     let info = texture_info(t);
-    if !is_depth(info.format) || info.kind != TEXTURE_2D || info.samples != 1 ||
-       (info.usage & SAMPLED) == 0 || region.mip != 0 || region.layer != 0 {
+    let kind = if info.kind == TEXTURE_2D { 0 } else if info.kind == TEXTURE_2D_ARRAY { 1 }
+               else if info.kind == TEXTURE_CUBE { 2 } else { -1 };
+    let layers = if kind == 1 { info.depth } else if kind == 2 { 6 } else { 1 };
+    if !is_depth(info.format) || kind < 0 || info.samples != 1 || (info.usage & SAMPLED) == 0 ||
+       region.mip < 0 || region.mip >= info.mips || region.layer < 0 || region.layer >= layers {
         return Texture { 0 };
     }
-    let w = if region.w == 0 { info.width } else { region.w };
-    let h = if region.w == 0 { info.height } else if region.h == 0 { 1 } else { region.h };
+    let mw = if info.width >> region.mip > 0 { info.width >> region.mip } else { 1 };
+    let mh = if info.height >> region.mip > 0 { info.height >> region.mip } else { 1 };
+    let w = if region.w == 0 { mw } else { region.w };
+    let h = if region.w == 0 { mh } else if region.h == 0 { 1 } else { region.h };
     let x = if region.w == 0 { 0 } else { region.x };
     let y = if region.w == 0 { 0 } else { region.y };
-    if x < 0 || y < 0 || w < 1 || h < 1 || x + w > info.width || y + h > info.height ||
+    if x < 0 || y < 0 || w < 1 || h < 1 || x + w > mw || y + h > mh ||
        (bytes >= 0 && bytes != 4 * w as i64 * h) {
         return Texture { 0 };
     }
     if depth_reader.opened != open_count() {
         let vs = embed_shader("vert", """
-            layout(location = 0) in ivec2 a_origin;
-            layout(location = 0) flat out ivec2 v_origin;
+            layout(location = 0) in ivec4 a_at;
+            layout(location = 0) flat out ivec4 v_at;
             void main() {
                 vec2 p = vec2(float((gl_VertexIndex << 1) & 2), float(gl_VertexIndex & 2));
-                v_origin = a_origin;
+                v_at = a_at;
                 gl_Position = vec4(p.x * 2.0 - 1.0, 1.0 - p.y * 2.0, 0.0, 1.0);
             }
             """);
-        let fs = embed_shader("frag", """
+        depth_reader.pipelines[0] = pipeline(vs, embed_shader("frag", """
             layout(set = 2, binding = 0) uniform sampler2D depth;
-            layout(location = 0) flat in ivec2 v_origin;
+            layout(location = 0) flat in ivec4 v_at;
             layout(location = 0) out float result;
-            void main() { result = texelFetch(depth, v_origin + ivec2(gl_FragCoord.xy), 0).r; }
-            """);
-        depth_reader.pipeline = pipeline(vs, fs);
+            void main() { result = texelFetch(depth, v_at.xy + ivec2(gl_FragCoord.xy), v_at.w).r; }
+            """));
+        depth_reader.pipelines[1] = pipeline(vs, embed_shader("frag", """
+            layout(set = 2, binding = 0) uniform sampler2DArray depth;
+            layout(location = 0) flat in ivec4 v_at;
+            layout(location = 0) out float result;
+            void main() {
+                result = texelFetch(depth, ivec3(v_at.xy + ivec2(gl_FragCoord.xy), v_at.z), v_at.w).r;
+            }
+            """));
+        depth_reader.pipelines[2] = pipeline(vs, embed_shader("frag", """
+            layout(set = 2, binding = 0) uniform samplerCube depth;
+            layout(location = 0) flat in ivec4 v_at;
+            layout(location = 0) out float result;
+            void main() {
+                float n = float(textureSize(depth, v_at.w).x);
+                vec2 st = (vec2(v_at.xy + ivec2(gl_FragCoord.xy)) + 0.5) / n * 2.0 - 1.0;
+                float s = st.x, t = st.y;
+                vec3 d = v_at.z == 0 ? vec3(1.0, -t, -s)
+                       : v_at.z == 1 ? vec3(-1.0, -t, s)
+                       : v_at.z == 2 ? vec3(s, 1.0, t)
+                       : v_at.z == 3 ? vec3(s, -1.0, -t)
+                       : v_at.z == 4 ? vec3(s, -t, 1.0)
+                       : vec3(-s, -t, -1.0);
+                result = textureLod(depth, d, float(v_at.w)).r;
+            }
+            """));
         depth_reader.sampler = sampler(NEAREST, CLAMP);
         depth_reader.opened = open_count();
     }
-    let origin: int2[3] = [int2 { x, y }; 3];
-    let at = buffer(BUFFER_VERTEX, bytes_of(origin));
+    let at_each: int4[3] = [int4 { x, y, region.layer, region.mip }; 3];
+    let at = buffer(BUFFER_VERTEX, bytes_of(at_each));
     let target = render_target(w, h, R32F);
     begin_pass(target, Texture { 0 }, float4 { 0.0, 0.0, 0.0, 0.0 });
-    bind(depth_reader.pipeline);
+    bind(depth_reader.pipelines[kind]);
     bind_vertex_buffer(at);
     bind_texture(FRAGMENT, 0, t, depth_reader.sampler);
     draw(3);
