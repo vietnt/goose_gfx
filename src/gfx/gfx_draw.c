@@ -90,9 +90,11 @@ uint8_t gs_gfx_begin_pass(const gs_gfx_pass_desc *d) {
         dt.clear_depth = d->depth_value;
         dt.load_op = d->clear_depth ? SDL_GPU_LOADOP_CLEAR : SDL_GPU_LOADOP_LOAD;
         dt.store_op = SDL_GPU_STOREOP_STORE;
-        dt.stencil_load_op = SDL_GPU_LOADOP_CLEAR;
+        dt.clear_stencil = d->stencil_value;
+        dt.stencil_load_op = d->clear_stencil ? SDL_GPU_LOADOP_CLEAR : SDL_GPU_LOADOP_LOAD;
         dt.stencil_store_op = SDL_GPU_STOREOP_STORE;
-        dt.cycle = d->clear_depth != 0;
+        /* Fresh memory would lose the stencil a pass loads. */
+        dt.cycle = d->clear_depth && (d->clear_stencil || !gfx_has_stencil(s->format));
         t.has_depth = true;
         t.depth = s->format;
     }
@@ -133,6 +135,11 @@ void gs_gfx_bind_pipeline(gs_gfx_pipeline p) {
     if ((s->desc.depth_test || s->desc.depth_write) && !gfx.targets.has_depth) {
         gfx_misuse("bind_pipeline: the pipeline tests or writes depth, and the pass has no "
                    "depth target");
+        return;
+    }
+    if (s->desc.stencil_test && !(gfx.targets.has_depth && gfx_has_stencil(gfx.targets.depth))) {
+        gfx_misuse("bind_pipeline: the pipeline tests stencil, and the pass's depth target has "
+                   "none");
         return;
     }
     SDL_GPUGraphicsPipeline *gp = gfx_pipeline_for(s, &gfx.targets);
@@ -297,6 +304,18 @@ void gs_gfx_scissor(int64_t x, int64_t y, int64_t w, int64_t h) {
     }
     SDL_Rect r = { (int)x, (int)y, (int)w, (int)h };
     SDL_SetGPUScissor(gfx.pass, &r);
+}
+
+void gs_gfx_stencil_ref(int64_t ref) {
+    if (!gfx.pass) {
+        gfx_misuse("stencil_ref outside a render pass");
+        return;
+    }
+    if ((uint64_t)ref > 255) {
+        gfx_misuse("stencil_ref %lld: a stencil value is 0 to 255", (long long)ref);
+        return;
+    }
+    SDL_SetGPUStencilReference(gfx.pass, (Uint8)ref);
 }
 
 void gs_gfx_blend_constant(float r, float g, float b, float a) {

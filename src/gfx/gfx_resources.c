@@ -31,6 +31,15 @@ bool gfx_texture_format(int32_t format, SDL_GPUTextureFormat *out) {
         case GS_GFX_DEPTH24: *out = SDL_GPU_TEXTUREFORMAT_D24_UNORM; return true;
         case GS_GFX_DEPTH32F: *out = SDL_GPU_TEXTUREFORMAT_D32_FLOAT; return true;
         case GS_GFX_DEPTH24_STENCIL8: *out = SDL_GPU_TEXTUREFORMAT_D24_UNORM_S8_UINT; return true;
+        case GS_GFX_DEPTH32F_STENCIL8: *out = SDL_GPU_TEXTUREFORMAT_D32_FLOAT_S8_UINT; return true;
+        case GS_GFX_DEPTH_STENCIL:
+            /* Apple GPUs have no D24S8, and some others no D32FS8. */
+            *out = gfx.dev && SDL_GPUTextureSupportsFormat(
+                                  gfx.dev, SDL_GPU_TEXTUREFORMAT_D32_FLOAT_S8_UINT,
+                                  SDL_GPU_TEXTURETYPE_2D, SDL_GPU_TEXTUREUSAGE_DEPTH_STENCIL_TARGET)
+                       ? SDL_GPU_TEXTUREFORMAT_D32_FLOAT_S8_UINT
+                       : SDL_GPU_TEXTUREFORMAT_D24_UNORM_S8_UINT;
+            return true;
         case GS_GFX_BC1: *out = SDL_GPU_TEXTUREFORMAT_BC1_RGBA_UNORM; return true;
         case GS_GFX_BC3: *out = SDL_GPU_TEXTUREFORMAT_BC3_RGBA_UNORM; return true;
         case GS_GFX_BC4: *out = SDL_GPU_TEXTUREFORMAT_BC4_R_UNORM; return true;

@@ -376,6 +376,21 @@ SDL_GPUGraphicsPipeline *gfx_pipeline_for(gfx_pipeline_slot *p, const gfx_target
                                                          : SDL_GPU_COMPAREOP_LESS;
     ci.depth_stencil_state.enable_depth_test = d->depth_test && t->has_depth;
     ci.depth_stencil_state.enable_depth_write = d->depth_write && t->has_depth;
+    if (d->stencil_test) {
+        SDL_GPUStencilOpState front = { (SDL_GPUStencilOp)d->stencil_fail,
+                                        (SDL_GPUStencilOp)d->stencil_pass,
+                                        (SDL_GPUStencilOp)d->stencil_depth_fail,
+                                        (SDL_GPUCompareOp)d->stencil_compare };
+        SDL_GPUStencilOpState back = { (SDL_GPUStencilOp)d->stencil_back_fail,
+                                       (SDL_GPUStencilOp)d->stencil_back_pass,
+                                       (SDL_GPUStencilOp)d->stencil_back_depth_fail,
+                                       (SDL_GPUCompareOp)d->stencil_back_compare };
+        ci.depth_stencil_state.enable_stencil_test = true;
+        ci.depth_stencil_state.front_stencil_state = front;
+        ci.depth_stencil_state.back_stencil_state = d->stencil_back_compare ? back : front;
+        ci.depth_stencil_state.compare_mask = (Uint8)d->stencil_read_mask;
+        ci.depth_stencil_state.write_mask = (Uint8)d->stencil_write_mask;
+    }
     SDL_GPUColorTargetDescription colors[4];
     for (int i = 0; i < t->ncolor; i++) {
         SDL_zero(colors[i]);
@@ -408,6 +423,20 @@ gs_gfx_pipeline gs_gfx_create_pipeline(gs_gfx_bytes vs, gs_gfx_bytes fs,
         gfx_misuse("a PipelineDesc with a primitive, cull, blend, compare or write mask that is "
                    "not one of gfx's constants");
         return h;
+    }
+    if (d->stencil_test) {
+        int32_t compares[2] = { d->stencil_compare, d->stencil_back_compare };
+        int32_t ops[6] = { d->stencil_fail, d->stencil_depth_fail, d->stencil_pass,
+                           d->stencil_back_fail, d->stencil_back_depth_fail, d->stencil_back_pass };
+        int nops = d->stencil_back_compare ? 6 : 3;
+        bool ok = compares[0] >= 1 && compares[0] <= 8 && (uint32_t)compares[1] <= 8 &&
+                  (uint32_t)d->stencil_read_mask <= 255 && (uint32_t)d->stencil_write_mask <= 255;
+        for (int i = 0; i < nops; i++) ok = ok && ops[i] >= 1 && ops[i] <= 8;
+        if (!ok) {
+            gfx_misuse("a PipelineDesc's stencil state: a COMPARE_*, STENCIL_* operations and "
+                       "masks of 0 to 255");
+            return h;
+        }
     }
     if (d->blend == GS_GFX_BLEND_CUSTOM) {
         int32_t factors[4] = { d->blend_src, d->blend_dst, d->blend_src_alpha, d->blend_dst_alpha };

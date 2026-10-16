@@ -114,6 +114,10 @@ let DEPTH24: i32 = 17;
 let DEPTH32F: i32 = 18;
 let DEPTH24_STENCIL8: i32 = 19;
 let DEPTH: i32 = 20;
+let DEPTH32F_STENCIL8: i32 = 36;
+// DEPTH32F_STENCIL8 where it can be a target, else DEPTH24_STENCIL8: Apple
+// GPUs have no DEPTH24_STENCIL8.
+let DEPTH_STENCIL: i32 = 37;
 // Block-compressed, 4 x 4 texels a block, SAMPLED only: uploaded and read
 // back as blocks, in regions of whole blocks but where a mip's edge cuts
 // them short. BC1 is RGB with 1-bit alpha (8 bytes a block), BC2 RGB with
@@ -190,6 +194,17 @@ let WRITE_G: i32 = 2;
 let WRITE_B: i32 = 4;
 let WRITE_A: i32 = 8;
 let WRITE_ALL: i32 = 15;
+// Stencil operations, for PipelineDesc's stencil_fail, stencil_depth_fail
+// and stencil_pass. INCREMENT and DECREMENT clamp to 0 and 255; the _WRAP
+// ones wrap around.
+let STENCIL_KEEP: i32 = 1;
+let STENCIL_ZERO: i32 = 2;
+let STENCIL_REPLACE: i32 = 3;          // with the pass's stencil_ref()
+let STENCIL_INCREMENT: i32 = 4;
+let STENCIL_DECREMENT: i32 = 5;
+let STENCIL_INVERT: i32 = 6;
+let STENCIL_INCREMENT_WRAP: i32 = 7;
+let STENCIL_DECREMENT_WRAP: i32 = 8;
 
 // Vertex attribute formats, for PipelineDesc.formats: what a vertex buffer
 // holds for a shader input when that is not the input's own type as 32-bit
@@ -325,6 +340,23 @@ struct PipelineDesc {
     blend_dst_alpha: i32 = 1,
     blend_op_alpha: i32 = 1,
     write_mask: i32 = 15,           // WRITE_ALL
+    // Stencil, into a depth target with stencil (DEPTH_STENCIL): a
+    // fragment passes where (stencil_ref() & read_mask) stencil_compare
+    // (stencil & read_mask); then stencil_fail, stencil_depth_fail
+    // (passed stencil, failed depth) or stencil_pass is done to the bits of
+    // stencil_write_mask. Back faces take the stencil_back_ ones where
+    // stencil_back_compare is not 0, else the same.
+    stencil_test: bool = false,
+    stencil_compare: i32 = 8,       // COMPARE_ALWAYS
+    stencil_fail: i32 = 1,          // STENCIL_KEEP
+    stencil_depth_fail: i32 = 1,
+    stencil_pass: i32 = 1,
+    stencil_back_compare: i32 = 0,
+    stencil_back_fail: i32 = 1,
+    stencil_back_depth_fail: i32 = 1,
+    stencil_back_pass: i32 = 1,
+    stencil_read_mask: i32 = 255,
+    stencil_write_mask: i32 = 255,
 }
 
 // One input event of the last frame. The fields a kind has are the ones
@@ -353,6 +385,8 @@ struct PassDesc {
     clear_depth: bool = true,
     color_value: float4 = float4 { 0.0, 0.0, 0.0, 1.0 },
     depth_value: f32 = 1.0,
+    clear_stencil: bool = true,                 // a depth target's stencil, to stencil_value
+    stencil_value: u8 = 0,
 }
 
 // --- device, window and frames -----------------------------------------------
@@ -650,7 +684,9 @@ fn read_texture(t: Texture, region: Region, out: u8[:]) -> bool {
     ok
 }
 
-fn is_depth(format: i32) -> bool { format >= DEPTH16 && format <= DEPTH }
+fn is_depth(format: i32) -> bool {
+    (format >= DEPTH16 && format <= DEPTH) || format == DEPTH32F_STENCIL8 || format == DEPTH_STENCIL
+}
 
 // What reading depth back keeps: made the first time, and again after gfx is
 // opened again.
@@ -883,6 +919,9 @@ fn uniforms<T>(stage: i64, slot: i64, u: T) {
 extern "gs_gfx_viewport" fn viewport(x: f32, y: f32, w: f32, h: f32);
 // w == 0: the whole target.
 extern "gs_gfx_scissor" fn scissor(x: i64, y: i64, w: i64, h: i64);
+// The value stencil tests compare with and STENCIL_REPLACE writes, 0 to
+// 255, for the rest of the pass; each pass starts at 0.
+extern "gs_gfx_stencil_ref" fn stencil_ref(ref: i64);
 // The color FACTOR_CONSTANT and FACTOR_ONE_MINUS_CONSTANT blend by, for the
 // rest of the pass; each pass starts at 1, 1, 1, 1.
 extern "gs_gfx_blend_constant" fn blend_constant_raw(r: f32, g: f32, b: f32, a: f32);

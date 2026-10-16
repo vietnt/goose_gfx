@@ -246,6 +246,9 @@ void gfx_fence_drop(gfx_fence *f);
 
 /* The Goose format constants, mapped. */
 bool gfx_texture_format(int32_t format, SDL_GPUTextureFormat *out);
+static inline bool gfx_has_stencil(SDL_GPUTextureFormat f) {
+    return f == SDL_GPU_TEXTUREFORMAT_D24_UNORM_S8_UINT || f == SDL_GPU_TEXTUREFORMAT_D32_FLOAT_S8_UINT;
+}
 const char *gfx_stage_name(int64_t stage);
 
 gfx_texture_slot *gfx_texture_slot_of(gs_gfx_texture t);

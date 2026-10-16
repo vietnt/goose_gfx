@@ -103,6 +103,12 @@ typedef struct {
        for color and for alpha. */
     int32_t blend_src, blend_dst, blend_op, blend_src_alpha, blend_dst_alpha, blend_op_alpha;
     int32_t write_mask;         /* the WRITE_* channels a draw writes, of every target */
+    /* Stencil: SDL_GPUCompareOp and SDL_GPUStencilOp values for front faces,
+       and for back faces where stencil_back_compare is not 0. */
+    uint8_t stencil_test;
+    int32_t stencil_compare, stencil_fail, stencil_depth_fail, stencil_pass;
+    int32_t stencil_back_compare, stencil_back_fail, stencil_back_depth_fail, stencil_back_pass;
+    int32_t stencil_read_mask, stencil_write_mask;
 } gs_gfx_pipeline_desc;
 
 typedef struct {
@@ -113,6 +119,7 @@ typedef struct {
     uint8_t clear_color, clear_depth;
     gs_gfx_float4 color_value;
     float depth_value;
+    uint8_t clear_stencil, stencil_value;
 } gs_gfx_pass_desc;
 
 #pragma pack(pop)
@@ -208,6 +215,7 @@ typedef struct {
     X(void, gs_gfx_viewport, (float x, float y, float w, float h)) \
     X(void, gs_gfx_scissor, (int64_t x, int64_t y, int64_t w, int64_t h)) \
     X(void, gs_gfx_blend_constant, (float r, float g, float b, float a)) \
+    X(void, gs_gfx_stencil_ref, (int64_t ref)) \
     X(void, gs_gfx_draw, (int64_t vertices, int64_t instances, int64_t first_vertex, int64_t first_instance)) \
     X(void, gs_gfx_draw_indexed, (int64_t indices, int64_t instances, int64_t first_index, int64_t vertex_offset, int64_t first_instance)) \
     /* Compute. */ \
@@ -283,6 +291,10 @@ GS_GFX_API(GS_GFX_PROTO)
     X(i32, DEPTH32F, 18) \
     X(i32, DEPTH24_STENCIL8, 19) \
     X(i32, DEPTH, 20) \
+    X(i32, DEPTH32F_STENCIL8, 36) \
+    /* DEPTH_STENCIL is DEPTH32F_STENCIL8 where it can be a target, else \
+       DEPTH24_STENCIL8. */ \
+    X(i32, DEPTH_STENCIL, 37) \
     /* Block-compressed formats, 4 x 4 texels a block: BC1 (RGB with 1-bit \
        alpha, 8 bytes a block), BC2 (RGB with 4-bit alpha, 16), BC3 (RGBA, \
        16), BC4 (R, 8), BC5 (RG, 16), BC7 (RGBA, 16), the sRGB forms of BC1, \
@@ -355,6 +367,15 @@ GS_GFX_API(GS_GFX_PROTO)
     X(i32, WRITE_B, 4) \
     X(i32, WRITE_A, 8) \
     X(i32, WRITE_ALL, 15) \
+    /* Stencil operations: SDL_GPUStencilOp. */ \
+    X(i32, STENCIL_KEEP, 1) \
+    X(i32, STENCIL_ZERO, 2) \
+    X(i32, STENCIL_REPLACE, 3) \
+    X(i32, STENCIL_INCREMENT, 4) \
+    X(i32, STENCIL_DECREMENT, 5) \
+    X(i32, STENCIL_INVERT, 6) \
+    X(i32, STENCIL_INCREMENT_WRAP, 7) \
+    X(i32, STENCIL_DECREMENT_WRAP, 8) \
     /* Vertex attribute formats, for PipelineDesc.formats. */ \
     X(u8, VERTEX_FLOAT, 1) \
     X(u8, VERTEX_FLOAT2, 2) \
