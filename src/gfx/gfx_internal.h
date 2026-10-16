@@ -203,6 +203,7 @@ typedef struct {
     gfx_fence *in_flight[2];
     int nin_flight;
     int64_t frames_in_flight;
+    SDL_GPUPresentMode present_mode;    /* the window's; SDL's default, VSYNC, is 0 */
     gfx_shader **shaders;
     int nshaders, shaders_cap;
 

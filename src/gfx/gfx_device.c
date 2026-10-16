@@ -530,13 +530,18 @@ static bool gfx_start(bool windowed, gs_gfx_bytes title, int64_t width, int64_t 
             gs_gfx_close();
             return false;
         }
-        if (flags & GS_GFX_NO_VSYNC) {
-            SDL_GPUPresentMode modes[] = { SDL_GPU_PRESENTMODE_MAILBOX,
-                                           SDL_GPU_PRESENTMODE_IMMEDIATE };
+        if (flags & (GS_GFX_NO_VSYNC | GS_GFX_IMMEDIATE)) {
+            /* NO_VSYNC tries mailbox first, which does not tear; IMMEDIATE
+               tries immediate first, which does not queue. */
+            bool immediate = (flags & GS_GFX_IMMEDIATE) != 0;
+            SDL_GPUPresentMode modes[] = {
+                immediate ? SDL_GPU_PRESENTMODE_IMMEDIATE : SDL_GPU_PRESENTMODE_MAILBOX,
+                immediate ? SDL_GPU_PRESENTMODE_MAILBOX : SDL_GPU_PRESENTMODE_IMMEDIATE };
             for (int i = 0; i < 2; i++) {
-                if (SDL_WindowSupportsGPUPresentMode(gfx.dev, gfx.window, modes[i])) {
+                if (SDL_WindowSupportsGPUPresentMode(gfx.dev, gfx.window, modes[i]) &&
                     SDL_SetGPUSwapchainParameters(gfx.dev, gfx.window,
-                                                  SDL_GPU_SWAPCHAINCOMPOSITION_SDR, modes[i]);
+                                                  SDL_GPU_SWAPCHAINCOMPOSITION_SDR, modes[i])) {
+                    gfx.present_mode = modes[i];
                     break;
                 }
             }
@@ -608,6 +613,8 @@ void gs_gfx_close(void) {
     gfx.d3dcompiler = d3dcompiler;
     gfx.d3dcompile = d3dcompile;
 }
+
+int64_t gs_gfx_present_mode(void) { return gfx.window ? (int64_t)gfx.present_mode : -1; }
 
 int64_t gs_gfx_driver(gs_gfx_bytes out) {
     const char *name = gfx.dev ? SDL_GetGPUDeviceDriver(gfx.dev) : "";

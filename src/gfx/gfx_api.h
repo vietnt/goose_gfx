@@ -121,6 +121,7 @@ typedef struct {
     X(int64_t, gs_gfx_error, (gs_gfx_bytes out)) \
     X(int64_t, gs_gfx_misuse_count, (void)) \
     X(int64_t, gs_gfx_driver, (gs_gfx_bytes out)) \
+    X(int64_t, gs_gfx_present_mode, (void)) \
     X(uint8_t, gs_gfx_frame, (void)) \
     X(void, gs_gfx_quit, (void)) \
     X(void, gs_gfx_flush, (void)) \
@@ -223,6 +224,11 @@ GS_GFX_API(GS_GFX_PROTO)
     X(i32, WINDOW_FULLSCREEN, 4) \
     X(i32, NO_VSYNC, 16) \
     X(i32, DEBUG, 32) \
+    X(i32, IMMEDIATE, 64) \
+    /* present_mode(): SDL_GPUPresentMode. */ \
+    X(i32, PRESENT_VSYNC, 0) \
+    X(i32, PRESENT_IMMEDIATE, 1) \
+    X(i32, PRESENT_MAILBOX, 2) \
     /* Shader stages. */ \
     X(i32, VERTEX, 0) \
     X(i32, FRAGMENT, 1) \

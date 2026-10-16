@@ -306,6 +306,9 @@ mouse confinement and Alt-Tab still need an interactive check on each platform.
   lines, blending, a viewport and scissor, tone mapping), checking itself
   through readbacks and saving screenshots. `run_window_test.py` runs it in
   every way the machine can and compares the screenshots across them.
+  `gfx_present.goose` prints the present mode each open() flag gives a
+  window (`goose run test/window/gfx_present.goose`; on Linux with no
+  display, under `xvfb-run` with `SDL_VIDEODRIVER=x11`).
 
 ### Platforms tested
 

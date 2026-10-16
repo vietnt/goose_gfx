@@ -52,8 +52,14 @@ import math;
 let WINDOW_RESIZABLE: i32 = 1;
 let WINDOW_HIDDEN: i32 = 2;
 let WINDOW_FULLSCREEN: i32 = 4;
-let NO_VSYNC: i32 = 16;
+let NO_VSYNC: i32 = 16;         // present without waiting: mailbox where the window has it, else immediate
 let DEBUG: i32 = 32;            // validation layers, where installed; on in a debug build of gfx
+let IMMEDIATE: i32 = 64;        // present at once, tearing allowed: immediate where the window has it, else mailbox
+
+// present_mode(): how frames are presented.
+let PRESENT_VSYNC: i32 = 0;
+let PRESENT_IMMEDIATE: i32 = 1;
+let PRESENT_MAILBOX: i32 = 2;
 
 // Shader stages.
 let VERTEX: i32 = 0;
@@ -343,6 +349,9 @@ fn driver() -> u8[>..] {
     name.resize(min(n, 64));
     return name;
 }
+// How the window's frames are presented: PRESENT_VSYNC unless NO_VSYNC or
+// IMMEDIATE asked for another the window has; -1 headless.
+extern "gs_gfx_present_mode" fn present_mode() -> i64;
 
 // Ends the frame drawn since the last call, showing the screen in the
 // window, and handles the window's events: false once it has been asked to
