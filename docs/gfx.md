@@ -350,5 +350,8 @@ until CI or a Mac runs them.
   it by default. `test/gfx/gfx_demote.goose` says `// needs: demote` on its
   first line, and the runner skips it with a compiler that cannot compile
   that.
+* **Optional, last: handles checked across `close()`.** A handle from before
+  a `close()` and reopen can name a resource of the new device; the game
+  never closes and reopens, so this is a documented limit for now.
 * **A 2D and 3D immediate-mode layer in Goose** on top of this one, as
   Lobster has, and shader hot reload.
