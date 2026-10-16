@@ -634,6 +634,14 @@ fn vertex_buffer(data: const u8[:]) -> Buffer { buffer(BUFFER_VERTEX, data.len, 
 fn index_buffer(data: const u8[:]) -> Buffer { buffer(BUFFER_INDEX, data.len, data) }
 extern "gs_gfx_update_buffer" fn update_buffer(b: Buffer, offset: i64, data: const u8[:]) -> bool;
 fn update_buffer(b: Buffer, data: const u8[:]) -> bool { update_buffer(b, 0, data) }
+// Copies `size` bytes of `src` from `from` on to `dst` from `to` on, on the
+// GPU and in order with the work recorded around it. Not inside a pass; the
+// offsets and size are multiples of 4, and the two ranges of one buffer do
+// not overlap.
+extern "gs_gfx_copy_buffer" fn copy_buffer(src: Buffer, from: i64, dst: Buffer, to: i64,
+                                           size: i64) -> bool;
+// All of `src` to the start of `dst`.
+fn copy_buffer(src: Buffer, dst: Buffer) -> bool { copy_buffer(src, 0, dst, 0, buffer_size(src)) }
 extern "gs_gfx_read_buffer" fn read_buffer_into(b: Buffer, offset: i64, out: u8[:]) -> bool;
 extern "gs_gfx_buffer_size" fn buffer_size(b: Buffer) -> i64;
 extern "gs_gfx_release_buffer" fn release(b: Buffer);
@@ -712,6 +720,20 @@ fn copy_buffer_to_texture(b: Buffer, offset: i64, t: Texture, region: Region) ->
 // Into the whole of mip 0 of layer 0.
 fn copy_buffer_to_texture(b: Buffer, t: Texture) -> bool {
     copy_buffer_to_texture(b, 0, t, Region {})
+}
+// Copies `from` of `src` into `dst` at the mip, layer and x, y, z of `to`,
+// whose size is from's, on the GPU and in order with the work recorded
+// around it. Not inside a pass; the two have one format, neither is depth
+// nor multisampled, and within one texture they are different mips or
+// layers (a 3D texture's slices are one layer).
+extern "gs_gfx_copy_texture" fn copy_texture_region(src: Texture, from: const Region&,
+        dst: Texture, to: const Region&) -> bool;
+fn copy_texture(src: Texture, from: Region, dst: Texture, to: Region) -> bool {
+    copy_texture_region(src, from, dst, to)
+}
+// The whole of mip 0 of layer 0, into the same corner of dst's.
+fn copy_texture(src: Texture, dst: Texture) -> bool {
+    copy_texture(src, Region {}, dst, Region {})
 }
 extern "gs_gfx_read_texture" fn read_texture_into(t: Texture, region: const Region&,
                                                   out: u8[:]) -> bool;

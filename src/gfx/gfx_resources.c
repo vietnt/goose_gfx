@@ -223,6 +223,33 @@ uint8_t gs_gfx_update_buffer(gs_gfx_buffer b, int64_t offset, gs_gfx_bytes data)
                              whole, "update_buffer");
 }
 
+/* Metal on macOS wants a buffer copy's offsets and size multiples of 4,
+   and Vulkan a copy within one buffer to two ranges that do not overlap. */
+uint8_t gs_gfx_copy_buffer(gs_gfx_buffer src, int64_t from, gs_gfx_buffer dst, int64_t to,
+                           int64_t size) {
+    const char *what = "copy_buffer";
+    if (!gfx_need_device(what)) return 0;
+    gfx_buffer_slot *s = gfx_buffer_slot_of(src), *t = gfx_buffer_slot_of(dst);
+    if (!s || !t) return 0;
+    if (from < 0 || to < 0 || size < 0 || from % 4 || to % 4 || size % 4)
+        return gfx_misuse("%s: offsets %lld and %lld and size %lld are not all multiples of 4",
+                          what, (long long)from, (long long)to, (long long)size);
+    if (from + size > (int64_t)s->size || to + size > (int64_t)t->size)
+        return gfx_misuse("%s: %lld bytes from %lld of a %u-byte buffer to %lld of a %u-byte one",
+                          what, (long long)size, (long long)from, s->size, (long long)to, t->size);
+    if (s == t && from < to + size && to < from + size)
+        return gfx_misuse("%s: the ranges at %lld and %lld of one buffer overlap", what,
+                          (long long)from, (long long)to);
+    if (!size) return 1;
+    SDL_GPUCommandBuffer *cb = gfx_copy_cmd(false, what);
+    if (!cb) return 0;
+    SDL_GPUCopyPass *cp = SDL_BeginGPUCopyPass(cb);
+    SDL_GPUBufferLocation a = { s->buf, (Uint32)from }, b = { t->buf, (Uint32)to };
+    SDL_CopyGPUBufferToBuffer(cp, &a, &b, (Uint32)size, false);
+    SDL_EndGPUCopyPass(cp);
+    return 1;
+}
+
 static gs_gfx_readback gfx_request_buffer(gs_gfx_buffer b, int64_t offset, int64_t size,
                                           const char *what);
 static bool gfx_take(gs_gfx_readback h, void *out, int64_t len, const char *what);
@@ -506,6 +533,39 @@ uint8_t gs_gfx_copy_buffer_to_texture(gs_gfx_buffer b, int64_t offset, gs_gfx_te
     src.buffer = bs->buf;
     src.offset = (Uint32)offset;
     SDL_CopyGPUBufferToTexture(cp, &src, &reg, false);
+    SDL_EndGPUCopyPass(cp);
+    return 1;
+}
+
+/* SDL copies between textures of one format, and within one texture only
+   between mips or layers: its Vulkan backend moves the whole of a mip's
+   layer to the source layout and then to the destination's. */
+uint8_t gs_gfx_copy_texture(gs_gfx_texture src, const gs_gfx_region *from, gs_gfx_texture dst,
+                            const gs_gfx_region *to) {
+    const char *what = "copy_texture";
+    if (!gfx_need_device(what)) return 0;
+    gfx_texture_slot *s = gfx_texture_slot_of(src), *t = gfx_texture_slot_of(dst);
+    if (!s || !t) return 0;
+    if (s->desc.samples > 1 || t->desc.samples > 1)
+        return gfx_misuse("%s: a multisampled texture", what);
+    if (gfx_is_depth(s->format) || gfx_is_depth(t->format))
+        return gfx_misuse("%s: a depth texture", what);
+    if (s->format != t->format) return gfx_misuse("%s: textures of different formats", what);
+    SDL_GPUTextureRegion a, b;
+    if (!gfx_region(s, from, &a, what)) return 0;
+    gs_gfx_region at = *to;
+    at.w = (int32_t)a.w;
+    at.h = (int32_t)a.h;
+    at.d = (int32_t)a.d;
+    if (!gfx_region(t, &at, &b, what)) return 0;
+    if (s == t && a.mip_level == b.mip_level && a.layer == b.layer)
+        return gfx_misuse("%s: within one mip of one layer of a texture", what);
+    SDL_GPUCommandBuffer *cb = gfx_copy_cmd(false, what);
+    if (!cb) return 0;
+    SDL_GPUCopyPass *cp = SDL_BeginGPUCopyPass(cb);
+    SDL_GPUTextureLocation sl = { a.texture, a.mip_level, a.layer, a.x, a.y, a.z };
+    SDL_GPUTextureLocation dl = { b.texture, b.mip_level, b.layer, b.x, b.y, b.z };
+    SDL_CopyGPUTextureToTexture(cp, &sl, &dl, a.w, a.h, a.d, false);
     SDL_EndGPUCopyPass(cp);
     return 1;
 }
