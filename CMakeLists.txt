@@ -75,6 +75,8 @@ add_library(goose_gfx STATIC
     src/gfx/gfx_draw.c
 )
 target_link_libraries(goose_gfx PUBLIC SDL3::SDL3-static)
+# The Vulkan headers SDL carries, for the feature structs SDL_GPUVulkanOptions takes.
+target_include_directories(goose_gfx PRIVATE "${GOOSE_GFX_SDL}/src/video/khronos")
 
 # --- the audio layer: the PCM mixer, no window ---------------------------------
 add_library(goose_audio STATIC src/audio/audio.c src/audio/audio_api.h)

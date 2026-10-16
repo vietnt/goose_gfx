@@ -16,6 +16,10 @@ VUID, or one an older layer reports without an ID). The layer's cache of shaders
 checks its shaders again. On Direct3D 12 it fails a run whose stderr has a
 debug-layer error, which SDL logs at its GPU category's warn level.
 
+A test whose first line is `// needs: <what>` uses a shader feature newer
+than some Goose compilers; with one whose shader compiler cannot compile
+NEEDS[<what>], it is reported as skipped.
+
     python test/run_gfx_tests.py [--goose PATH] [--require-gpu] [--validate] [--jit-only | --aot-only] [name ...]
 """
 
@@ -29,6 +33,9 @@ from pathlib import Path
 REPO = Path(__file__).resolve().parent.parent
 TESTS = REPO / "test" / "gfx"
 NO_GPU = "gfx: no GPU device"
+NEEDS = {
+    "demote": "layout(location = 0) out vec4 c;\nvoid main() { demote; c = vec4(1.0); }\n",
+}
 
 
 def run(cmd, timeout, env=None):
@@ -61,6 +68,18 @@ def driver(goose, timeout):
         code, out, _ = run([goose, "run", str(probe)], timeout)
     lines = out.split()
     return lines[-1] if code == 0 and lines else None
+
+
+def lacks(goose, test, tmp, timeout):
+    """What of NEEDS the test needs that the compiler cannot compile, or None."""
+    first = test.read_text().split("\n", 1)[0]
+    if not first.startswith("// needs: "):
+        return None
+    what = first[len("// needs: "):].strip()
+    probe = Path(tmp) / f"needs-{what}.frag"
+    probe.write_text(NEEDS[what])
+    code, _, _ = run([goose, "--compile-shader", str(probe)], timeout)
+    return None if code == 0 else what
 
 
 def check(name, how, code, out, err, expected, require_gpu, log):
@@ -124,6 +143,11 @@ def main():
             if not expected_file.exists():
                 print(f"FAIL {t.stem}: no {expected_file.name}")
                 counts["fail"] += 1
+                continue
+            what = lacks(args.goose, t, tmp, args.timeout)
+            if what:
+                print(f"SKIP {t.stem}: this compiler's shaders have no {what}")
+                counts["skip"] += 1
                 continue
             expected = expected_file.read_text()
             runs = []

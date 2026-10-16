@@ -3,6 +3,7 @@
 
 #include "gfx_internal.h"
 
+#include <vulkan/vulkan_core.h>
 #include <stdarg.h>
 #include <stdlib.h>
 
@@ -426,9 +427,11 @@ static bool gfx_skip_unreachable_wayland(void) {
 }
 
 /* The embedded shaders' SPIR-V is version 1.3, which Vulkan takes from 1.1
-   on, and SDL asks for Vulkan 1.0 unless told otherwise; so ask for 1.1. A
-   machine whose Vulkan cannot give 1.1 gets the device SDL makes by
-   default. Other backends ignore the Vulkan options. */
+   on, and SDL asks for Vulkan 1.0 unless told otherwise. So ask for 1.3 with
+   shaderDemoteToHelperInvocation, which a shader's demote needs, then for
+   1.1, then for the device SDL makes by default. Vulkan is SDL's last
+   backend, so an attempt no Vulkan device meets fails instead of picking
+   another driver. Other backends ignore the Vulkan options. */
 static SDL_GPUDevice *gfx_create_device(SDL_GPUShaderFormat formats, bool debug) {
     SDL_PropertiesID props = SDL_CreateProperties();
     SDL_SetBooleanProperty(props, SDL_PROP_GPU_DEVICE_CREATE_DEBUGMODE_BOOLEAN, debug);
@@ -438,11 +441,20 @@ static SDL_GPUDevice *gfx_create_device(SDL_GPUShaderFormat formats, bool debug)
                            (formats & SDL_GPU_SHADERFORMAT_DXBC) != 0);
     SDL_SetBooleanProperty(props, SDL_PROP_GPU_DEVICE_CREATE_SHADERS_MSL_BOOLEAN,
                            (formats & SDL_GPU_SHADERFORMAT_MSL) != 0);
-    SDL_GPUVulkanOptions vulkan;
-    SDL_zero(vulkan);
-    vulkan.vulkan_api_version = (1u << 22) | (1u << 12);   /* VK_API_VERSION_1_1 */
-    SDL_SetPointerProperty(props, SDL_PROP_GPU_DEVICE_CREATE_VULKAN_OPTIONS_POINTER, &vulkan);
-    SDL_GPUDevice *dev = SDL_CreateGPUDeviceWithProperties(props);
+    VkPhysicalDeviceVulkan13Features vk13;
+    SDL_zero(vk13);
+    vk13.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES;
+    vk13.shaderDemoteToHelperInvocation = VK_TRUE;
+    SDL_GPUVulkanOptions vulkan[2];
+    SDL_zeroa(vulkan);
+    vulkan[0].vulkan_api_version = VK_API_VERSION_1_3;
+    vulkan[0].feature_list = &vk13;
+    vulkan[1].vulkan_api_version = VK_API_VERSION_1_1;
+    SDL_GPUDevice *dev = NULL;
+    for (int i = 0; i < 2 && !dev; i++) {
+        SDL_SetPointerProperty(props, SDL_PROP_GPU_DEVICE_CREATE_VULKAN_OPTIONS_POINTER, &vulkan[i]);
+        dev = SDL_CreateGPUDeviceWithProperties(props);
+    }
     if (!dev) {
         SDL_ClearProperty(props, SDL_PROP_GPU_DEVICE_CREATE_VULKAN_OPTIONS_POINTER);
         dev = SDL_CreateGPUDeviceWithProperties(props);

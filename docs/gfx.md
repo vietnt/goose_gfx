@@ -339,9 +339,16 @@ until CI or a Mac runs them.
   wait for it: GPU timestamps (SDL_GPU has no timestamp queries), GPU
   memory budget and usage (no query either), copies from a buffer into a
   texture on the GPU (SDL_GPU uploads into textures from transfer buffers
-  only), and compressed-texture downloads on Direct3D 12 (above). Shader
-  built-ins that `embed_shader`'s GLSL front end does not take yet
-  (`gl_FragDepth`, `textureQueryLod`, `textureGather`, `gl_FrontFacing`,
-  `gl_SampleID`) need the Goose compiler to change, not this layer.
+  only), and compressed-texture downloads on Direct3D 12 (above).
+* **Shader built-ins from the compiler fork.** `gl_FragDepth`,
+  `gl_FrontFacing`, `gl_SampleID`, `textureGather`, `textureQueryLod`,
+  `texture(s, P, bias)` and `demote` are in `embed_shader`'s GLSL front end
+  in `vietnt/goose`, not in upstream's compiler. This layer's part is
+  `demote`, which Vulkan runs only with the device feature
+  `shaderDemoteToHelperInvocation`: the device is made with Vulkan 1.3 and
+  that feature where the machine has them, else with 1.1, else as SDL makes
+  it by default. `test/gfx/gfx_demote.goose` says `// needs: demote` on its
+  first line, and the runner skips it with a compiler that cannot compile
+  that.
 * **A 2D and 3D immediate-mode layer in Goose** on top of this one, as
   Lobster has, and shader hot reload.
