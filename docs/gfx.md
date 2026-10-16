@@ -357,6 +357,20 @@ until CI or a Mac runs them.
   it by default. `test/gfx/gfx_demote.goose` says `// needs: demote` on its
   first line, and the runner skips it with a compiler that cannot compile
   that.
+* **A storage buffer's `.length()` on Metal.** It reads 0 there: SDL_GPU's
+  Metal backend gives a shader no buffer sizes, and the compiler's MSL
+  prints the length of a runtime array as 0 (Vulkan and Direct3D 12 query
+  it). The fix is in both: the compiler's MSL declares a hidden uniform
+  block of byte sizes and divides by the stride, and this layer pushes the
+  size of each storage buffer it binds into it, as SPIRV-Cross's buffer-size
+  buffer does.
+* **Clear values at texture creation.** Direct3D 12's debug layer warns
+  (#820, #821 `CLEAR*VIEW_MISMATCHINGCLEARVALUE`) each time a target is
+  cleared to a value other than the one it was created with, which is
+  every clear here, thousands of times in `gfx_pacing`. SDL takes that
+  value at creation (`SDL_PROP_GPU_TEXTURE_CREATE_D3D12_CLEAR_R_FLOAT` to
+  `_A_FLOAT`, `_DEPTH_FLOAT`, `_STENCIL_NUMBER`), the likely route: a
+  target's clear color given when it is made.
 * **SDL**: review release-3.4.18 and move the submodule to it, dropping the
   carried Direct3D 12 fix above; it also brings SDL's polling fallback for
   the debug layer's messages where `ID3D12InfoQueue1` is missing.
