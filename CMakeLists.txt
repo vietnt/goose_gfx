@@ -64,6 +64,36 @@ set(SDL_OPENGL OFF CACHE BOOL "" FORCE)
 set(SDL_OPENGLES OFF CACHE BOOL "" FORCE)
 add_subdirectory("${GOOSE_GFX_SDL}" SDL EXCLUDE_FROM_ALL)
 
+# --- an SDL fix carried until the pinned SDL has it ---------------------------
+# SDL 3.4.16's Direct3D 12 backend registers its debug-layer message callback
+# with a NULL cookie, which ID3D12InfoQueue1::RegisterMessageCallback rejects
+# with E_INVALIDARG, so no debug-layer message ever reaches SDL's log. SDL
+# fixed it in 67bf94eed5 ("gpu: Pass a valid pCallbackCookie pointer to
+# RegisterMessageCallback"), in release-3.4.18 as 39c59cd2e1. Until
+# third_party/SDL is moved past it, the backend compiles from a copy with that
+# fix in the build tree, and the submodule stays as fetched. Only Windows
+# builds the backend.
+set(gfx_d3d12_c "${GOOSE_GFX_SDL}/src/gpu/d3d12/SDL_gpu_d3d12.c")
+get_target_property(gfx_sdl_sources SDL3-static SOURCES)
+if(gfx_d3d12_c IN_LIST gfx_sdl_sources)
+    set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${gfx_d3d12_c}")
+    file(READ "${gfx_d3d12_c}" gfx_text)
+    set(gfx_call "(ID3D12InfoQueue1_RegisterMessageCallback\\([^;]*D3D12_MESSAGE_CALLBACK_FLAG_NONE,[ \t\r\n]*NULL,[ \t\r\n]*)NULL\\);")
+    if(NOT gfx_text MATCHES "${gfx_call}")
+        message(FATAL_ERROR "gfx: SDL_gpu_d3d12.c no longer registers its debug callback with a NULL "
+                            "cookie; remove the fix for it from this CMakeLists")
+    endif()
+    string(REGEX REPLACE "${gfx_call}" "DWORD callbackCookie = 0;\n    \\1&callbackCookie);"
+           gfx_text "${gfx_text}")
+    set(gfx_fixed_c "${CMAKE_CURRENT_BINARY_DIR}/sdl_fixed/SDL_gpu_d3d12.c")
+    file(WRITE "${gfx_fixed_c}" "${gfx_text}")
+    list(REMOVE_ITEM gfx_sdl_sources "${gfx_d3d12_c}")
+    set_property(TARGET SDL3-static PROPERTY SOURCES ${gfx_sdl_sources} "${gfx_fixed_c}")
+    # Its relative includes ("../SDL_sysgpu.h") resolve from the original's directory.
+    set_source_files_properties("${gfx_fixed_c}" TARGET_DIRECTORY SDL3-static
+                                PROPERTIES INCLUDE_DIRECTORIES "${GOOSE_GFX_SDL}/src/gpu/d3d12")
+endif()
+
 # --- the gfx layer -----------------------------------------------------------
 add_library(goose_gfx STATIC
     src/gfx/gfx_api.h

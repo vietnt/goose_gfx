@@ -75,7 +75,14 @@ uses them also needs a `goose` built from that fork.
   `release-3.4.16`). The package's CMakeLists builds it static, without its
   2D renderer, OpenGL or the camera, none of which SDL_GPU needs.
   `SDL_DEPS_SHARED` stays on, so on Linux SDL links only the C library and
-  loads X11, Wayland, audio and udev at run time.
+  loads X11, Wayland, audio and udev at run time. One SDL fix is carried
+  until the submodule moves past it: SDL 3.4.16's Direct3D 12 backend
+  registers its debug-layer callback with a NULL cookie, which
+  `ID3D12InfoQueue1::RegisterMessageCallback` rejects, so the debug layer's
+  errors never reached SDL's log (or `--validate`). SDL fixed it in
+  67bf94eed5, in release-3.4.18 as 39c59cd2e1; the CMakeLists compiles the
+  backend from a copy with that fix in the build tree, and fails to
+  configure, saying to drop the fix, once SDL has it.
 * **The static C runtime on Windows** (`CMAKE_MSVC_RUNTIME_LIBRARY
   MultiThreaded`, in every configuration): the compiler, TinyCC, SDL and the
   layer share the runtime a plain `cl game.c` links, so a program can link the
@@ -350,6 +357,9 @@ until CI or a Mac runs them.
   it by default. `test/gfx/gfx_demote.goose` says `// needs: demote` on its
   first line, and the runner skips it with a compiler that cannot compile
   that.
+* **SDL**: review release-3.4.18 and move the submodule to it, dropping the
+  carried Direct3D 12 fix above; it also brings SDL's polling fallback for
+  the debug layer's messages where `ID3D12InfoQueue1` is missing.
 * **Optional, last: handles checked across `close()`.** A handle from before
   a `close()` and reopen can name a resource of the new device; the game
   never closes and reopens, so this is a documented limit for now.
