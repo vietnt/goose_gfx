@@ -59,11 +59,14 @@ three modules in use.
 | `CMakeLists.txt` | builds SDL3, `goose_gfx`, `goose_audio` and `goose_ui` as static libraries, carried by the target `goose_gfx_package` |
 | `src/gfx/`, `src/audio/`, `src/ui/` | the layers; each `*_api.h` lists every function its module declares, and `test/api_check.py` checks the two agree |
 | `src/gfx/gfx_blob.h` | the shader blob the compiler writes and the layer reads, a copy of the compiler's header kept in step by the blob's version |
+| `test/gfx/`, `test/run_gfx_tests.py` | headless gfx tests against this checkout: programs that render off screen and print what they read back, compared exactly with their `.out`, run JIT and AOT |
 | `test/audio_device.c` | the audio layer's own test, the CMake target `goose_audio_test` |
 | `test/window/` | the gfx showcase and input test, which need a display and a GPU; run from a Goose checkout |
 | `third_party/SDL`, `third_party/nuklear` | shallow submodules pinned to commits; clone with `--recursive` |
 
-The headless tests of the modules run in Goose's own test suite.
+The headless tests of the modules run in Goose's own test suite;
+`python test/run_gfx_tests.py --require-gpu` runs this package's own
+(`test/gfx/`) against the checkout, with the `goose` on PATH.
 
 ## License
 
