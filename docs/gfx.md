@@ -151,7 +151,8 @@ fields in the same order, and the same constant values.
   command buffer (its uniform buffers, the textures it used, which cycling
   reuses) only when it sees the buffer's fence signaled, and a fence
   released after a query alone is reset by the next submit first, so that
-  buffer would never be cleaned up.
+  buffer would never be cleaned up (`docs/sdl-fence-release-leak.md`, with
+  a repro using SDL alone).
 * **Everything is in pixels.** A window always asks for the display's full
   pixel density, so on a high-density display its screen has more pixels
   than its size in the display's coordinates, which SDL gives the mouse in:
