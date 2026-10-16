@@ -425,6 +425,32 @@ static bool gfx_skip_unreachable_wayland(void) {
     return SDL_SetHint(SDL_HINT_VIDEO_DRIVER, drivers);
 }
 
+/* The embedded shaders' SPIR-V is version 1.3, which Vulkan takes from 1.1
+   on, and SDL asks for Vulkan 1.0 unless told otherwise; so ask for 1.1. A
+   machine whose Vulkan cannot give 1.1 gets the device SDL makes by
+   default. Other backends ignore the Vulkan options. */
+static SDL_GPUDevice *gfx_create_device(SDL_GPUShaderFormat formats, bool debug) {
+    SDL_PropertiesID props = SDL_CreateProperties();
+    SDL_SetBooleanProperty(props, SDL_PROP_GPU_DEVICE_CREATE_DEBUGMODE_BOOLEAN, debug);
+    SDL_SetBooleanProperty(props, SDL_PROP_GPU_DEVICE_CREATE_SHADERS_SPIRV_BOOLEAN,
+                           (formats & SDL_GPU_SHADERFORMAT_SPIRV) != 0);
+    SDL_SetBooleanProperty(props, SDL_PROP_GPU_DEVICE_CREATE_SHADERS_DXBC_BOOLEAN,
+                           (formats & SDL_GPU_SHADERFORMAT_DXBC) != 0);
+    SDL_SetBooleanProperty(props, SDL_PROP_GPU_DEVICE_CREATE_SHADERS_MSL_BOOLEAN,
+                           (formats & SDL_GPU_SHADERFORMAT_MSL) != 0);
+    SDL_GPUVulkanOptions vulkan;
+    SDL_zero(vulkan);
+    vulkan.vulkan_api_version = (1u << 22) | (1u << 12);   /* VK_API_VERSION_1_1 */
+    SDL_SetPointerProperty(props, SDL_PROP_GPU_DEVICE_CREATE_VULKAN_OPTIONS_POINTER, &vulkan);
+    SDL_GPUDevice *dev = SDL_CreateGPUDeviceWithProperties(props);
+    if (!dev) {
+        SDL_ClearProperty(props, SDL_PROP_GPU_DEVICE_CREATE_VULKAN_OPTIONS_POINTER);
+        dev = SDL_CreateGPUDeviceWithProperties(props);
+    }
+    SDL_DestroyProperties(props);
+    return dev;
+}
+
 static bool gfx_start(bool windowed, gs_gfx_bytes title, int64_t width, int64_t height,
                       int64_t flags) {
     if (gfx.dev) return gfx_misuse("gfx is already open: close() it first");
@@ -465,7 +491,7 @@ static bool gfx_start(bool windowed, gs_gfx_bytes title, int64_t width, int64_t 
 #endif
     const char *env = SDL_getenv("GOOSE_GFX_DEBUG");
     if (env) debug = SDL_atoi(env) != 0;
-    gfx.dev = SDL_CreateGPUDevice(formats, debug, NULL);
+    gfx.dev = gfx_create_device(formats, debug);
     if (!gfx.dev) {
         gfx_fail("no GPU device: %s", SDL_GetError());
         gs_gfx_close();
