@@ -179,6 +179,18 @@ fields in the same order, and the same constant values.
   where it cannot, the read fails with the reason in `error()`. Mip 0 of a
   2D texture is what reads back; another mip, a layer, a cube or a
   multisampled depth texture is a misuse.
+* **Block-compressed textures** (BC1, BC3, BC4, BC5, BC7) are SAMPLED only,
+  with a width and height that are multiples of 4, as Direct3D 12 requires.
+  Their regions are whole 4 x 4 blocks, but where a mip's right or bottom
+  edge cuts a block short, and `region_size` counts their bytes, as it does
+  every format's (`SDL_CalculateGPUTextureFormatSize`). A transfer's row
+  length and rows are rounded up to whole blocks, which Vulkan requires.
+  Their mips are uploaded, not generated. Reading one back on Direct3D 12 is
+  refused: SDL 3.4's Direct3D 12 download of a compressed texture copies
+  the region's texel rows, not its block rows, out of its staging buffer
+  (`D3D12_DownloadFromTexture` records the texel height, and the copy back
+  loops over it), past the end of a tightly sized one. Uploading and
+  sampling work there; the refusal goes once SDL copies block rows.
 * **Shaders**: the device takes SPIR-V where it can, else DXBC, else MSL. DXBC
   is the blob's HLSL compiled at load time by `d3dcompiler_47.dll`, which ships
   with Windows 10 and 11, loaded by name. Each SDL shader is made once per blob.

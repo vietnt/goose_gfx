@@ -105,6 +105,16 @@ let DEPTH24: i32 = 17;
 let DEPTH32F: i32 = 18;
 let DEPTH24_STENCIL8: i32 = 19;
 let DEPTH: i32 = 20;
+// Block-compressed, 4 x 4 texels a block, SAMPLED only: uploaded and read
+// back as blocks, in regions of whole blocks but where a mip's edge cuts
+// them short. BC1 is RGB with 1-bit alpha (8 bytes a block), BC3 RGBA (16),
+// BC4 one channel (8), BC5 two (16), BC7 RGBA (16). texture() returns a
+// zero handle, with error() set, where the device has no BC formats.
+let BC1: i32 = 21;
+let BC3: i32 = 22;
+let BC4: i32 = 23;
+let BC5: i32 = 24;
+let BC7: i32 = 25;
 
 // Samplers.
 let NEAREST: i32 = 0;
@@ -629,13 +639,17 @@ fn depth_copy(t: Texture, region: Region, bytes: i64) -> Texture {
     release(at);
     target
 }
+// The bytes `region` of texture `t` takes as update_texture takes it and
+// read_texture gives it: texels packed row after row, whole blocks of a
+// compressed format, an f32 a texel of a depth format. 0 for a region not
+// in the texture, which is a misuse.
+extern "gs_gfx_region_size" fn region_size_of(t: Texture, region: const Region&) -> i64;
+fn region_size(t: Texture, region: Region) -> i64 { region_size_of(t, region) }
 // Appends the whole of mip 0 of layer 0 to `out`, as the elements of out's
 // type: u8 for the bytes of an RGBA8 texture, float4 for RGBA32F texels.
 fn read_texture<T>(t: Texture, out: T[>..]&) -> bool {
-    let info = texture_info(t);
     var raw: u8[>..] = [];
-    raw.resize(texel_size(info.format) * info.width * info.height *
-               (if info.kind == TEXTURE_3D { info.depth } else { 1 }), 0);
+    raw.resize(region_size(t, Region {}), 0);
     let ok = read_texture(t, Region {}, raw);
     append_as(raw, out);
     ok
@@ -666,8 +680,8 @@ fn texture_info(t: Texture) -> TextureDesc {
 }
 extern "gs_gfx_release_texture" fn release(t: Texture);
 
-// The bytes one texel of `format` takes as it is read back: 4 for every
-// depth format, read as f32.
+// The bytes one texel of an uncompressed `format` takes as it is read back:
+// 4 for every depth format, read as f32. region_size counts compressed ones.
 fn texel_size(format: i32) -> i64 {
     if format == R8 { return 1; }
     if format == RG8 || format == R16F { return 2; }

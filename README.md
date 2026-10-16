@@ -66,7 +66,9 @@ three modules in use.
 
 The headless tests of the modules run in Goose's own test suite;
 `python test/run_gfx_tests.py --require-gpu` runs this package's own
-(`test/gfx/`) against the checkout, with the `goose` on PATH.
+(`test/gfx/`) against the checkout, with the `goose` on PATH; `--validate`
+adds the Vulkan validation layers (Debian's `vulkan-validationlayers`) and
+fails on any valid-usage error.
 
 ## License
 

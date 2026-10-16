@@ -28,6 +28,11 @@ bool gfx_texture_format(int32_t format, SDL_GPUTextureFormat *out) {
         case GS_GFX_DEPTH24: *out = SDL_GPU_TEXTUREFORMAT_D24_UNORM; return true;
         case GS_GFX_DEPTH32F: *out = SDL_GPU_TEXTUREFORMAT_D32_FLOAT; return true;
         case GS_GFX_DEPTH24_STENCIL8: *out = SDL_GPU_TEXTUREFORMAT_D24_UNORM_S8_UINT; return true;
+        case GS_GFX_BC1: *out = SDL_GPU_TEXTUREFORMAT_BC1_RGBA_UNORM; return true;
+        case GS_GFX_BC3: *out = SDL_GPU_TEXTUREFORMAT_BC3_RGBA_UNORM; return true;
+        case GS_GFX_BC4: *out = SDL_GPU_TEXTUREFORMAT_BC4_R_UNORM; return true;
+        case GS_GFX_BC5: *out = SDL_GPU_TEXTUREFORMAT_BC5_RG_UNORM; return true;
+        case GS_GFX_BC7: *out = SDL_GPU_TEXTUREFORMAT_BC7_RGBA_UNORM; return true;
         case GS_GFX_DEPTH:
             /* 32-bit float where it can be sampled too, as for a shadow map. */
             *out = gfx.dev && SDL_GPUTextureSupportsFormat(
@@ -46,6 +51,21 @@ static bool gfx_is_depth(SDL_GPUTextureFormat f) {
     return f == SDL_GPU_TEXTUREFORMAT_D16_UNORM || f == SDL_GPU_TEXTUREFORMAT_D24_UNORM ||
            f == SDL_GPU_TEXTUREFORMAT_D32_FLOAT || f == SDL_GPU_TEXTUREFORMAT_D24_UNORM_S8_UINT ||
            f == SDL_GPU_TEXTUREFORMAT_D32_FLOAT_S8_UINT;
+}
+
+/* The width and height of a block of `f`: 4 for the block-compressed
+   formats, 1 for the rest. */
+static uint32_t gfx_block(SDL_GPUTextureFormat f) {
+    switch (f) {
+        case SDL_GPU_TEXTUREFORMAT_BC1_RGBA_UNORM:
+        case SDL_GPU_TEXTUREFORMAT_BC3_RGBA_UNORM:
+        case SDL_GPU_TEXTUREFORMAT_BC4_R_UNORM:
+        case SDL_GPU_TEXTUREFORMAT_BC5_RG_UNORM:
+        case SDL_GPU_TEXTUREFORMAT_BC7_RGBA_UNORM:
+            return 4;
+        default:
+            return 1;
+    }
 }
 
 const char *gfx_stage_name(int64_t stage) {
@@ -287,7 +307,18 @@ gs_gfx_texture gs_gfx_create_texture(const gs_gfx_texture_desc *desc) {
         return h;
     }
     /* Generating mips draws into each level, which needs a color target. */
-    if (d.mips > 1 && (usage & SDL_GPU_TEXTUREUSAGE_SAMPLER) && !depth)
+    bool compressed = gfx_block(format) > 1;
+    if (compressed && usage != SDL_GPU_TEXTUREUSAGE_SAMPLER) {
+        gfx_misuse("a compressed texture is SAMPLED only: uploaded as blocks, not drawn or stored into");
+        return h;
+    }
+    /* Direct3D 12 requires it, so every backend does. */
+    if (compressed && (d.width % 4 || d.height % 4)) {
+        gfx_misuse("a compressed texture of %d x %d: its width and height are multiples of 4",
+                   d.width, d.height);
+        return h;
+    }
+    if (d.mips > 1 && (usage & SDL_GPU_TEXTUREUSAGE_SAMPLER) && !depth && !compressed)
         usage |= SDL_GPU_TEXTUREUSAGE_COLOR_TARGET;
     SDL_GPUTextureType type = (SDL_GPUTextureType)d.kind;
     /* Reading a depth texture back samples it, so one is sampled where the
@@ -355,6 +386,13 @@ static bool gfx_region(gfx_texture_slot *s, const gs_gfx_region *r, SDL_GPUTextu
         r->y + h > mh || r->z + dd > md)
         return gfx_misuse("%s: region %d,%d,%d + %d x %d x %d is outside the %d x %d x %d mip",
                           what, r->x, r->y, r->z, r->w, h, dd, mw, mh, md);
+    /* A compressed region is whole blocks, but for those the mip's right or
+       bottom edge cuts short. */
+    uint32_t b = gfx_block(s->format);
+    if (b > 1 && (r->x % b || r->y % b || (r->w % b && r->x + r->w != mw) ||
+                  (h % b && r->y + h != mh)))
+        return gfx_misuse("%s: region %d,%d + %d x %d of a compressed texture is not whole %u x %u "
+                          "blocks", what, r->x, r->y, r->w, h, b, b);
     out->x = (Uint32)r->x;
     out->y = (Uint32)r->y;
     out->z = (Uint32)r->z;
@@ -364,18 +402,32 @@ static bool gfx_region(gfx_texture_slot *s, const gs_gfx_region *r, SDL_GPUTextu
     return true;
 }
 
+/* The bytes a region of `s` takes in memory, tightly packed: whole blocks
+   of a compressed format. */
+static int64_t gfx_region_bytes(gfx_texture_slot *s, const SDL_GPUTextureRegion *reg) {
+    return (int64_t)SDL_CalculateGPUTextureFormatSize(s->format, reg->w, reg->h, reg->d);
+}
+
 static bool gfx_texture_bytes(gfx_texture_slot *s, const SDL_GPUTextureRegion *reg, int64_t len,
                               const char *what) {
-    int64_t want = (int64_t)SDL_GPUTextureFormatTexelBlockSize(s->format) * reg->w * reg->h *
-                   reg->d;
+    int64_t want = gfx_region_bytes(s, reg);
     if (len != want)
         return gfx_misuse("%s: %lld bytes for a %u x %u x %u region of %lld", what,
                           (long long)len, reg->w, reg->h, reg->d, (long long)want);
     return true;
 }
 
-static bool gfx_upload_texture(const SDL_GPUTextureRegion *reg, const void *data, uint32_t len,
-                               bool fresh, const char *what) {
+/* The row length and rows of a region as a transfer lays it out: whole
+   blocks, which Vulkan requires of a compressed format's strides. */
+static void gfx_transfer_layout(SDL_GPUTextureTransferInfo *t, const SDL_GPUTextureRegion *reg,
+                                SDL_GPUTextureFormat f) {
+    uint32_t b = gfx_block(f);
+    t->pixels_per_row = (reg->w + b - 1) / b * b;
+    t->rows_per_layer = (reg->h + b - 1) / b * b;
+}
+
+static bool gfx_upload_texture(const SDL_GPUTextureRegion *reg, SDL_GPUTextureFormat format,
+                               const void *data, uint32_t len, bool fresh, const char *what) {
     SDL_GPUCommandBuffer *cb = gfx_copy_cmd(fresh, what);
     if (!cb) return false;
     SDL_GPUTransferBuffer *tb = gfx_transfer(len, true);
@@ -390,8 +442,7 @@ static bool gfx_upload_texture(const SDL_GPUTextureRegion *reg, const void *data
     SDL_GPUTextureTransferInfo src;
     SDL_zero(src);
     src.transfer_buffer = tb;
-    src.pixels_per_row = reg->w;
-    src.rows_per_layer = reg->h;
+    gfx_transfer_layout(&src, reg, format);
     SDL_UploadToGPUTexture(cp, &src, reg, false);
     SDL_EndGPUCopyPass(cp);
     SDL_ReleaseGPUTransferBuffer(gfx.dev, tb);
@@ -407,12 +458,12 @@ uint8_t gs_gfx_update_texture(gs_gfx_texture t, const gs_gfx_region *region, gs_
     if (!gfx_region(s, region, &reg, "update_texture") ||
         !gfx_texture_bytes(s, &reg, data.len, "update_texture"))
         return 0;
-    return gfx_upload_texture(&reg, data.data, (uint32_t)data.len, false, "update_texture");
+    return gfx_upload_texture(&reg, s->format, data.data, (uint32_t)data.len, false, "update_texture");
 }
 
 /* The pixels of a texture region, into `out`, waiting for the GPU. */
-static bool gfx_download_texture(const SDL_GPUTextureRegion *reg, void *out, uint32_t len,
-                                 const char *what) {
+static bool gfx_download_texture(const SDL_GPUTextureRegion *reg, SDL_GPUTextureFormat format,
+                                 void *out, uint32_t len, const char *what) {
     SDL_GPUCommandBuffer *cb = gfx_copy_cmd(false, what);
     if (!cb) return false;
     SDL_GPUTransferBuffer *tb = gfx_transfer(len, false);
@@ -421,8 +472,7 @@ static bool gfx_download_texture(const SDL_GPUTextureRegion *reg, void *out, uin
     SDL_GPUTextureTransferInfo dst;
     SDL_zero(dst);
     dst.transfer_buffer = tb;
-    dst.pixels_per_row = reg->w;
-    dst.rows_per_layer = reg->h;
+    gfx_transfer_layout(&dst, reg, format);
     SDL_DownloadFromGPUTexture(cp, reg, &dst);
     SDL_EndGPUCopyPass(cp);
     bool ok = gfx_finish();
@@ -464,7 +514,23 @@ uint8_t gs_gfx_read_texture(gs_gfx_texture t, const gs_gfx_region *region, gs_gf
     if (!gfx_region(s, region, &reg, "read_texture")) return 0;
     if (gfx_is_depth(s->format)) return gfx_depth_unreadable(s, &reg, out.len, "read_texture");
     if (!gfx_texture_bytes(s, &reg, out.len, "read_texture")) return 0;
-    return gfx_download_texture(&reg, out.data, (uint32_t)out.len, "read_texture");
+    /* SDL 3.4's Direct3D 12 download of a compressed texture copies the
+       region's texel rows rather than its block rows out of its staging
+       buffer, past the end of a tightly sized one: refused until SDL is
+       fixed. */
+    if (gfx_block(s->format) > 1 && SDL_strcmp(SDL_GetGPUDeviceDriver(gfx.dev), "direct3d12") == 0)
+        return gfx_fail("read_texture: compressed textures cannot be read back on Direct3D 12 "
+                        "with SDL 3.4 (its download overruns); upload and sampling work");
+    return gfx_download_texture(&reg, s->format, out.data, (uint32_t)out.len, "read_texture");
+}
+
+int64_t gs_gfx_region_size(gs_gfx_texture t, const gs_gfx_region *region) {
+    if (!gfx_need_device("region_size")) return 0;
+    gfx_texture_slot *s = gfx_texture_slot_of(t);
+    if (!s) return 0;
+    SDL_GPUTextureRegion reg;
+    if (!gfx_region(s, region, &reg, "region_size")) return 0;
+    return gfx_is_depth(s->format) ? 4 * (int64_t)reg.w * reg.h : gfx_region_bytes(s, &reg);
 }
 
 uint8_t gs_gfx_save_png(gs_gfx_texture t, gs_gfx_bytes path) {
@@ -485,7 +551,7 @@ uint8_t gs_gfx_save_png(gs_gfx_texture t, gs_gfx_bytes path) {
     if (!gfx_region(s, &r, &reg, "save_png")) return 0;
     uint32_t len = reg.w * reg.h * 4;
     uint8_t *pixels = (uint8_t *)malloc(len);
-    bool ok = gfx_download_texture(&reg, pixels, len, "save_png");
+    bool ok = gfx_download_texture(&reg, s->format, pixels, len, "save_png");
     /* The screen is saved as it is shown: opaque, whatever alpha drawing
        left in it. */
     if (ok && t.id == gfx.screen.id)
@@ -548,7 +614,7 @@ gs_gfx_texture gs_gfx_load_texture(gs_gfx_bytes path, int64_t flags) {
         gs_gfx_region r = { 0 };
         SDL_GPUTextureRegion reg;
         gfx_region(s, &r, &reg, "load_texture");
-        bool ok = gfx_upload_texture(&reg, tight, (uint32_t)(row * (size_t)rgba->h), true,
+        bool ok = gfx_upload_texture(&reg, s->format, tight, (uint32_t)(row * (size_t)rgba->h), true,
                                      "load_texture");
         free(tight);
         if (ok && s->desc.mips > 1) {
@@ -573,6 +639,10 @@ void gs_gfx_generate_mips(gs_gfx_texture t) {
     if (!s) return;
     if (s->desc.mips < 2 || !(s->usage & SDL_GPU_TEXTUREUSAGE_SAMPLER)) {
         gfx_misuse("generate_mips: a sampled texture with more than one mip");
+        return;
+    }
+    if (gfx_block(s->format) > 1) {
+        gfx_misuse("generate_mips: a compressed texture; upload its mips");
         return;
     }
     SDL_GPUCommandBuffer *cb = gfx_copy_cmd(false, "generate_mips");

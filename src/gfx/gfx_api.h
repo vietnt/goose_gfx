@@ -168,6 +168,7 @@ typedef struct {
     X(gs_gfx_texture, gs_gfx_load_texture, (gs_gfx_bytes path, int64_t flags)) \
     X(uint8_t, gs_gfx_update_texture, (gs_gfx_texture t, const gs_gfx_region *region, gs_gfx_bytes data)) \
     X(uint8_t, gs_gfx_read_texture, (gs_gfx_texture t, const gs_gfx_region *region, gs_gfx_bytes out)) \
+    X(int64_t, gs_gfx_region_size, (gs_gfx_texture t, const gs_gfx_region *region)) \
     X(uint8_t, gs_gfx_save_png, (gs_gfx_texture t, gs_gfx_bytes path)) \
     X(void, gs_gfx_generate_mips, (gs_gfx_texture t)) \
     X(uint8_t, gs_gfx_texture_info, (gs_gfx_texture t, gs_gfx_texture_desc *out)) \
@@ -258,6 +259,14 @@ GS_GFX_API(GS_GFX_PROTO)
     X(i32, DEPTH32F, 18) \
     X(i32, DEPTH24_STENCIL8, 19) \
     X(i32, DEPTH, 20) \
+    /* Block-compressed formats, 4 x 4 texels a block: BC1 (RGB with 1-bit \
+       alpha, 8 bytes a block), BC3 (RGBA, 16), BC4 (R, 8), BC5 (RG, 16) and \
+       BC7 (RGBA, 16). Sampled only: uploaded and read back as blocks. */ \
+    X(i32, BC1, 21) \
+    X(i32, BC3, 22) \
+    X(i32, BC4, 23) \
+    X(i32, BC5, 24) \
+    X(i32, BC7, 25) \
     /* Samplers: SDL_GPUFilter, SDL_GPUSamplerAddressMode, SDL_GPUCompareOp. */ \
     X(i32, NEAREST, 0) \
     X(i32, LINEAR, 1) \
