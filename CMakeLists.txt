@@ -64,20 +64,54 @@ set(SDL_OPENGL OFF CACHE BOOL "" FORCE)
 set(SDL_OPENGLES OFF CACHE BOOL "" FORCE)
 add_subdirectory("${GOOSE_GFX_SDL}" SDL EXCLUDE_FROM_ALL)
 
-# --- an SDL fix carried until the pinned SDL has it ---------------------------
+# --- SDL fixes carried until the pinned SDL has them --------------------------
+# A fixed backend compiles from a copy in the build tree, and the submodule
+# stays as fetched. gfx_sdl_read reads a backend SDL builds into gfx_text, or
+# leaves gfx_text empty when this platform doesn't build it; gfx_sdl_fix
+# replaces a piece of it that occurs exactly once, failing otherwise, which
+# means SDL has changed there and the fix needs looking at again;
+# gfx_sdl_compile swaps the original for the fixed copy.
+get_target_property(gfx_sdl_sources SDL3-static SOURCES)
+function(gfx_sdl_read path)
+    set(text "")
+    if("${GOOSE_GFX_SDL}/${path}" IN_LIST gfx_sdl_sources)
+        set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${GOOSE_GFX_SDL}/${path}")
+        file(READ "${GOOSE_GFX_SDL}/${path}" text)
+        string(REPLACE "\r\n" "\n" text "${text}")
+    endif()
+    set(gfx_text "${text}" PARENT_SCOPE)
+endfunction()
+function(gfx_sdl_fix old new)
+    string(FIND "${gfx_text}" "${old}" first)
+    string(FIND "${gfx_text}" "${old}" last REVERSE)
+    if(first EQUAL -1 OR NOT first EQUAL last)
+        message(FATAL_ERROR "gfx: SDL no longer has this code exactly once; look at the fix for it "
+                            "in this CMakeLists again:\n${old}")
+    endif()
+    string(REPLACE "${old}" "${new}" text "${gfx_text}")
+    set(gfx_text "${text}" PARENT_SCOPE)
+endfunction()
+function(gfx_sdl_compile path)
+    get_filename_component(name "${path}" NAME)
+    get_filename_component(dir "${GOOSE_GFX_SDL}/${path}" DIRECTORY)
+    set(fixed "${CMAKE_CURRENT_BINARY_DIR}/sdl_fixed/${name}")
+    file(WRITE "${fixed}" "${gfx_text}")
+    get_target_property(sources SDL3-static SOURCES)
+    list(REMOVE_ITEM sources "${GOOSE_GFX_SDL}/${path}")
+    set_property(TARGET SDL3-static PROPERTY SOURCES ${sources} "${fixed}")
+    # Its relative includes ("../SDL_sysgpu.h") resolve from the original's directory.
+    set_source_files_properties("${fixed}" TARGET_DIRECTORY SDL3-static
+                                PROPERTIES INCLUDE_DIRECTORIES "${dir}")
+endfunction()
+
 # SDL 3.4.16's Direct3D 12 backend registers its debug-layer message callback
 # with a NULL cookie, which ID3D12InfoQueue1::RegisterMessageCallback rejects
 # with E_INVALIDARG, so no debug-layer message ever reaches SDL's log. SDL
 # fixed it in 67bf94eed5 ("gpu: Pass a valid pCallbackCookie pointer to
-# RegisterMessageCallback"), in release-3.4.18 as 39c59cd2e1. Until
-# third_party/SDL is moved past it, the backend compiles from a copy with that
-# fix in the build tree, and the submodule stays as fetched. Only Windows
+# RegisterMessageCallback"), in release-3.4.18 as 39c59cd2e1. Only Windows
 # builds the backend.
-set(gfx_d3d12_c "${GOOSE_GFX_SDL}/src/gpu/d3d12/SDL_gpu_d3d12.c")
-get_target_property(gfx_sdl_sources SDL3-static SOURCES)
-if(gfx_d3d12_c IN_LIST gfx_sdl_sources)
-    set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${gfx_d3d12_c}")
-    file(READ "${gfx_d3d12_c}" gfx_text)
+gfx_sdl_read(src/gpu/d3d12/SDL_gpu_d3d12.c)
+if(gfx_text)
     set(gfx_call "(ID3D12InfoQueue1_RegisterMessageCallback\\([^;]*D3D12_MESSAGE_CALLBACK_FLAG_NONE,[ \t\r\n]*NULL,[ \t\r\n]*)NULL\\);")
     if(NOT gfx_text MATCHES "${gfx_call}")
         message(FATAL_ERROR "gfx: SDL_gpu_d3d12.c no longer registers its debug callback with a NULL "
@@ -85,13 +119,31 @@ if(gfx_d3d12_c IN_LIST gfx_sdl_sources)
     endif()
     string(REGEX REPLACE "${gfx_call}" "DWORD callbackCookie = 0;\n    \\1&callbackCookie);"
            gfx_text "${gfx_text}")
-    set(gfx_fixed_c "${CMAKE_CURRENT_BINARY_DIR}/sdl_fixed/SDL_gpu_d3d12.c")
-    file(WRITE "${gfx_fixed_c}" "${gfx_text}")
-    list(REMOVE_ITEM gfx_sdl_sources "${gfx_d3d12_c}")
-    set_property(TARGET SDL3-static PROPERTY SOURCES ${gfx_sdl_sources} "${gfx_fixed_c}")
-    # Its relative includes ("../SDL_sysgpu.h") resolve from the original's directory.
-    set_source_files_properties("${gfx_fixed_c}" TARGET_DIRECTORY SDL3-static
-                                PROPERTIES INCLUDE_DIRECTORIES "${GOOSE_GFX_SDL}/src/gpu/d3d12")
+    gfx_sdl_compile(src/gpu/d3d12/SDL_gpu_d3d12.c)
+endif()
+
+# SDL's Vulkan backend compacts fragmented memory during a submit: it moves
+# each resource of a block into new memory, copying its contents, and points
+# the resource's handle at the new one. A command buffer still being recorded
+# then holds the old one, and its later commands, compute writes among them,
+# reach the old memory after the copy was made, so everything later sees the
+# contents from before them. SDL guards only against pending transfers
+# (still so in SDL's main branch as of 2026-10). Here it doesn't compact
+# while another command buffer is being recorded, as when gfx submits a new
+# resource's first contents in a frame; it does so at a later submit.
+gfx_sdl_read(src/gpu/vulkan/SDL_gpu_vulkan.c)
+if(gfx_text)
+    gfx_sdl_fix("    Uint8 defragInProgress;\n"
+                "    Uint8 defragInProgress;\n    SDL_AtomicInt recordingCommandBufferCount;\n")
+    gfx_sdl_fix("    if (!VULKAN_INTERNAL_BeginCommandBuffer(renderer, commandBuffer)) {\n        return NULL;\n    }\n"
+                "    if (!VULKAN_INTERNAL_BeginCommandBuffer(renderer, commandBuffer)) {\n        return NULL;\n    }\n    SDL_AtomicIncRef(&renderer->recordingCommandBufferCount);\n")
+    gfx_sdl_fix("        renderer->claimedWindowCount == 0;\n\n    SDL_LockMutex(renderer->submitLock);\n"
+                "        renderer->claimedWindowCount == 0;\n\n    (void)SDL_AtomicDecRef(&renderer->recordingCommandBufferCount);\n    SDL_LockMutex(renderer->submitLock);\n")
+    gfx_sdl_fix("        renderer->allocationsToDefragCount > 0 &&\n        !renderer->defragInProgress) {\n        if (!VULKAN_INTERNAL_DefragmentMemory("
+                "        renderer->allocationsToDefragCount > 0 &&\n        !renderer->defragInProgress &&\n        SDL_GetAtomicInt(&renderer->recordingCommandBufferCount) == 0) {\n        if (!VULKAN_INTERNAL_DefragmentMemory(")
+    gfx_sdl_fix("    renderer = vulkanCommandBuffer->renderer;\n\n    result = renderer->vkResetCommandBuffer("
+                "    renderer = vulkanCommandBuffer->renderer;\n    (void)SDL_AtomicDecRef(&renderer->recordingCommandBufferCount);\n\n    result = renderer->vkResetCommandBuffer(")
+    gfx_sdl_compile(src/gpu/vulkan/SDL_gpu_vulkan.c)
 endif()
 
 # --- the gfx layer -----------------------------------------------------------

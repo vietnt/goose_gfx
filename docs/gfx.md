@@ -75,14 +75,27 @@ uses them also needs a `goose` built from that fork.
   `release-3.4.16`). The package's CMakeLists builds it static, without its
   2D renderer, OpenGL or the camera, none of which SDL_GPU needs.
   `SDL_DEPS_SHARED` stays on, so on Linux SDL links only the C library and
-  loads X11, Wayland, audio and udev at run time. One SDL fix is carried
-  until the submodule moves past it: SDL 3.4.16's Direct3D 12 backend
-  registers its debug-layer callback with a NULL cookie, which
-  `ID3D12InfoQueue1::RegisterMessageCallback` rejects, so the debug layer's
-  errors never reached SDL's log (or `--validate`). SDL fixed it in
-  67bf94eed5, in release-3.4.18 as 39c59cd2e1; the CMakeLists compiles the
-  backend from a copy with that fix in the build tree, and fails to
-  configure, saying to drop the fix, once SDL has it.
+  loads X11, Wayland, audio and udev at run time. Two SDL fixes are carried;
+  the CMakeLists compiles each fixed backend from a copy in the build tree,
+  and fails to configure, saying to look at the fix again, once SDL's code
+  there changes.
+  * SDL 3.4.16's Direct3D 12 backend registers its debug-layer callback with
+    a NULL cookie, which `ID3D12InfoQueue1::RegisterMessageCallback`
+    rejects, so the debug layer's errors never reached SDL's log (or
+    `--validate`). SDL fixed it in 67bf94eed5, in release-3.4.18 as
+    39c59cd2e1.
+  * SDL's Vulkan backend compacts fragmented memory during a submit, moving
+    resources to new memory with a copy of their contents. It checked only
+    for pending transfers, so a submit while another command buffer was being
+    recorded could move what that one writes: its writes then went to the
+    old memory, and everything after sampled and read back the copy taken
+    before them. A program hits this headless (on a window, only frames that
+    present compact) when releases have left a block fragmented, a pass has
+    written a texture in it, and the same frame then creates a resource that
+    needs a new block, since a new resource's contents and a new texture's
+    first barrier are submitted at once (`test/gfx/gfx_compute_after_release`).
+    The fix compacts only when no other command buffer is being recorded.
+    SDL's main branch still has the bug as of 2026-10.
 * **The static C runtime on Windows** (`CMAKE_MSVC_RUNTIME_LIBRARY
   MultiThreaded`, in every configuration): the compiler, TinyCC, SDL and the
   layer share the runtime a plain `cl game.c` links, so a program can link the
@@ -385,7 +398,7 @@ until CI or a Mac runs them.
   `_A_FLOAT`, `_DEPTH_FLOAT`, `_STENCIL_NUMBER`), the likely route: a
   target's clear color given when it is made.
 * **SDL**: review release-3.4.18 and move the submodule to it, dropping the
-  carried Direct3D 12 fix above; it also brings SDL's polling fallback for
+  carried Direct3D 12 fix above and keeping the Vulkan one; it also brings SDL's polling fallback for
   the debug layer's messages where `ID3D12InfoQueue1` is missing.
 * **Optional, last: handles checked across `close()`.** A handle from before
   a `close()` and reopen can name a resource of the new device; the game
