@@ -290,6 +290,11 @@ gs_gfx_texture gs_gfx_create_texture(const gs_gfx_texture_desc *desc) {
     if (d.mips > 1 && (usage & SDL_GPU_TEXTUREUSAGE_SAMPLER) && !depth)
         usage |= SDL_GPU_TEXTUREUSAGE_COLOR_TARGET;
     SDL_GPUTextureType type = (SDL_GPUTextureType)d.kind;
+    /* Reading a depth texture back samples it, so one is sampled where the
+       device can. */
+    if (depth && d.samples == 1 &&
+        SDL_GPUTextureSupportsFormat(gfx.dev, format, type, usage | SDL_GPU_TEXTUREUSAGE_SAMPLER))
+        usage |= SDL_GPU_TEXTUREUSAGE_SAMPLER;
     if (!SDL_GPUTextureSupportsFormat(gfx.dev, format, type, usage)) {
         gfx_fail("this device does not support texture format %d with usage %u", d.format, usage);
         return h;
@@ -433,8 +438,22 @@ static bool gfx_download_texture(const SDL_GPUTextureRegion *reg, void *out, uin
 static bool gfx_readable(gfx_texture_slot *s, const char *what) {
     if (s->desc.samples > 1)
         return gfx_misuse("%s: a multisampled texture; read the texture it resolves to", what);
-    if (gfx_is_depth(s->format)) return gfx_misuse("%s: a depth texture cannot be read back", what);
     return true;
+}
+
+/* gfx.goose reads a depth texture by drawing it into an R32F target, which
+   SDL_GPU can download on every backend; what reaches here is a depth read
+   that cannot go that way, given a valid region. */
+static bool gfx_depth_unreadable(gfx_texture_slot *s, const SDL_GPUTextureRegion *reg,
+                                 int64_t len, const char *what) {
+    int64_t want = 4 * (int64_t)reg->w * reg->h;
+    if (len != want)
+        return gfx_misuse("%s: %lld bytes for a %u x %u region of a depth texture, read as f32: %lld",
+                          what, (long long)len, reg->w, reg->h, (long long)want);
+    if (!(s->usage & SDL_GPU_TEXTUREUSAGE_SAMPLER))
+        return gfx_fail("%s: this device cannot sample depth format %d, so it cannot read it back",
+                        what, s->desc.format);
+    return gfx_misuse("%s: a depth texture is read back from mip 0 of a 2D texture", what);
 }
 
 uint8_t gs_gfx_read_texture(gs_gfx_texture t, const gs_gfx_region *region, gs_gfx_bytes out) {
@@ -442,9 +461,9 @@ uint8_t gs_gfx_read_texture(gs_gfx_texture t, const gs_gfx_region *region, gs_gf
     gfx_texture_slot *s = gfx_texture_slot_of(t);
     if (!s || !gfx_readable(s, "read_texture")) return 0;
     SDL_GPUTextureRegion reg;
-    if (!gfx_region(s, region, &reg, "read_texture") ||
-        !gfx_texture_bytes(s, &reg, out.len, "read_texture"))
-        return 0;
+    if (!gfx_region(s, region, &reg, "read_texture")) return 0;
+    if (gfx_is_depth(s->format)) return gfx_depth_unreadable(s, &reg, out.len, "read_texture");
+    if (!gfx_texture_bytes(s, &reg, out.len, "read_texture")) return 0;
     return gfx_download_texture(&reg, out.data, (uint32_t)out.len, "read_texture");
 }
 
@@ -452,6 +471,7 @@ uint8_t gs_gfx_save_png(gs_gfx_texture t, gs_gfx_bytes path) {
     if (!gfx_need_device("save_png")) return 0;
     gfx_texture_slot *s = gfx_texture_slot_of(t);
     if (!s || !gfx_readable(s, "save_png")) return 0;
+    if (gfx_is_depth(s->format)) return gfx_misuse("save_png: a depth texture");
     SDL_PixelFormat pf;
     if (s->format == SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM ||
         s->format == SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM_SRGB)

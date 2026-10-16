@@ -557,10 +557,76 @@ fn update_texture(t: Texture, region: Region, data: const u8[:]) -> bool {
 fn update_texture(t: Texture, data: const u8[:]) -> bool { update_texture(t, Region {}, data) }
 extern "gs_gfx_read_texture" fn read_texture_into(t: Texture, region: const Region&,
                                                   out: u8[:]) -> bool;
+// A depth texture reads back as one f32 a texel, D16 and D24 normalized to
+// 0..1, from mip 0 of a 2D texture: SDL_GPU cannot download depth on every
+// backend, so it is drawn into an R32F target first.
 fn read_texture(t: Texture, region: Region, out: u8[:]) -> bool {
-    let ok = read_texture_into(t, region, out);
+    let target = depth_copy(t, region, out.len);
+    let all = Region {};
+    let ok = if target.id != 0 { read_texture_into(target, all, out) }
+             else { read_texture_into(t, region, out) };
+    if target.id != 0 { release(target); }
     check();
     ok
+}
+
+fn is_depth(format: i32) -> bool { format >= DEPTH16 && format <= DEPTH }
+
+// What reading depth back keeps: made the first time, and again after gfx is
+// opened again.
+struct DepthReader { opened: i64, pipeline: Pipeline, sampler: Sampler }
+var depth_reader = DepthReader { 0, Pipeline { 0 }, Sampler { 0 } };
+
+// An R32F texture holding `region` of depth texture `t`, drawn into it in
+// the command buffer being recorded; Texture { 0 } when `t` is not a depth
+// texture this can read, which read_texture_into then reports. The region's
+// origin comes per instance from a vertex buffer, not as uniforms, so the
+// uniforms the program pushed stay as they were.
+fn depth_copy(t: Texture, region: Region, bytes: i64) -> Texture {
+    let info = texture_info(t);
+    if !is_depth(info.format) || info.kind != TEXTURE_2D || info.samples != 1 ||
+       (info.usage & SAMPLED) == 0 || region.mip != 0 || region.layer != 0 {
+        return Texture { 0 };
+    }
+    let w = if region.w == 0 { info.width } else { region.w };
+    let h = if region.w == 0 { info.height } else if region.h == 0 { 1 } else { region.h };
+    let x = if region.w == 0 { 0 } else { region.x };
+    let y = if region.w == 0 { 0 } else { region.y };
+    if x < 0 || y < 0 || w < 1 || h < 1 || x + w > info.width || y + h > info.height ||
+       bytes != 4 * w as i64 * h as i64 {
+        return Texture { 0 };
+    }
+    if depth_reader.opened != open_count() {
+        let vs = embed_shader("vert", """
+            layout(location = 0) in ivec2 a_origin;
+            layout(location = 0) flat out ivec2 v_origin;
+            void main() {
+                vec2 p = vec2(float((gl_VertexIndex << 1) & 2), float(gl_VertexIndex & 2));
+                v_origin = a_origin;
+                gl_Position = vec4(p.x * 2.0 - 1.0, 1.0 - p.y * 2.0, 0.0, 1.0);
+            }
+            """);
+        let fs = embed_shader("frag", """
+            layout(set = 2, binding = 0) uniform sampler2D depth;
+            layout(location = 0) flat in ivec2 v_origin;
+            layout(location = 0) out float result;
+            void main() { result = texelFetch(depth, v_origin + ivec2(gl_FragCoord.xy), 0).r; }
+            """);
+        depth_reader.pipeline = pipeline(vs, fs, PipelineDesc { instance_location: 0 });
+        depth_reader.sampler = sampler(NEAREST, CLAMP);
+        depth_reader.opened = open_count();
+    }
+    let origin: int2[1] = [int2 { x, y }];
+    let at = buffer(BUFFER_VERTEX, bytes_of(origin));
+    let target = render_target(w, h, R32F);
+    begin_pass(target, Texture { 0 }, float4 { 0.0, 0.0, 0.0, 0.0 });
+    bind(depth_reader.pipeline);
+    bind_vertex_buffer(1, at, 0);
+    bind_texture(FRAGMENT, 0, t, depth_reader.sampler);
+    draw(3);
+    end_pass();
+    release(at);
+    target
 }
 // Appends the whole of mip 0 of layer 0 to `out`, as the elements of out's
 // type: u8 for the bytes of an RGBA8 texture, float4 for RGBA32F texels.
@@ -599,10 +665,11 @@ fn texture_info(t: Texture) -> TextureDesc {
 }
 extern "gs_gfx_release_texture" fn release(t: Texture);
 
-// The bytes one texel of `format` takes.
+// The bytes one texel of `format` takes as it is read back: 4 for every
+// depth format, read as f32.
 fn texel_size(format: i32) -> i64 {
     if format == R8 { return 1; }
-    if format == RG8 || format == R16F || format == DEPTH16 { return 2; }
+    if format == RG8 || format == R16F { return 2; }
     if format == RGBA16F || format == RG32F { return 8; }
     if format == RGBA32F { return 16; }
     return 4;

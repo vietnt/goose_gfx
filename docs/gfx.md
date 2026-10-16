@@ -168,6 +168,17 @@ fields in the same order, and the same constant values.
   is recorded in the frame's command buffer, and so happens between passes. A
   rewrite of a whole buffer lets SDL cycle it rather than wait for a draw still
   using it. Readback submits and waits.
+* **Depth reads back as f32.** SDL_GPU cannot download a depth texture on
+  every backend (Direct3D 12 copies depth only as a whole subresource), so
+  `read_texture` on one draws the region into an R32F target, a full-screen
+  triangle that `texelFetch`es it, and reads that: one f32 a texel for every
+  depth format, D16 and D24 normalized, stencil left out. The region's
+  origin reaches the shader per instance from a vertex buffer, so the
+  program's pushed uniforms are untouched. Depth textures, the screen's
+  included, are created sampled where the device can sample their format;
+  where it cannot, the read fails with the reason in `error()`. Mip 0 of a
+  2D texture is what reads back; another mip, a layer, a cube or a
+  multisampled depth texture is a misuse.
 * **Shaders**: the device takes SPIR-V where it can, else DXBC, else MSL. DXBC
   is the blob's HLSL compiled at load time by `d3dcompiler_47.dll`, which ships
   with Windows 10 and 11, loaded by name. Each SDL shader is made once per blob.
@@ -264,8 +275,8 @@ until CI or a Mac runs them.
   local first); and a struct field's default cannot name a global constant
   (the gfx descriptions spell their defaults as numbers).
 * **API**: gamepads and audio (SDL has them all), indirect draws,
-  stencil, blend constants, debug labels, a `Region` for readback of depth
-  textures (SDL_GPU cannot download one directly), checking uniform block
+  stencil, blend constants, debug labels, depth readback of a mip above 0,
+  an array layer, a cube face or a 3D texture, checking uniform block
   member offsets rather than size alone, and readback forms that return a
   fresh array of an explicit element type (`read_buffer<f32>(b, n)`) beside
   the ones that append to an out-array.

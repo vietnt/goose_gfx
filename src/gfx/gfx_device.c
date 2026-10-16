@@ -232,11 +232,15 @@ bool gfx_create_screen(int w, int h) {
     if (h < 1) h = 1;
     SDL_GPUTextureFormat depth;
     gfx_texture_format(GS_GFX_DEPTH, &depth);
+    /* Sampled where it can be, so that it can be read back. */
+    uint32_t depth_usage = SDL_GPU_TEXTUREUSAGE_DEPTH_STENCIL_TARGET;
+    if (SDL_GPUTextureSupportsFormat(gfx.dev, depth, SDL_GPU_TEXTURETYPE_2D,
+                                     depth_usage | SDL_GPU_TEXTUREUSAGE_SAMPLER))
+        depth_usage |= SDL_GPU_TEXTUREUSAGE_SAMPLER;
     if (!gfx_screen_texture(&gfx.screen, SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM,
                             SDL_GPU_TEXTUREUSAGE_COLOR_TARGET | SDL_GPU_TEXTUREUSAGE_SAMPLER,
                             GS_GFX_RGBA8, w, h) ||
-        !gfx_screen_texture(&gfx.screen_depth, depth, SDL_GPU_TEXTUREUSAGE_DEPTH_STENCIL_TARGET,
-                            GS_GFX_DEPTH, w, h))
+        !gfx_screen_texture(&gfx.screen_depth, depth, depth_usage, GS_GFX_DEPTH, w, h))
         return false;
     gfx.width = w;
     gfx.height = h;
