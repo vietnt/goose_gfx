@@ -346,7 +346,9 @@ fn driver() -> u8[>..] {
 // Ends the frame drawn since the last call, showing the screen in the
 // window, and handles the window's events: false once it has been asked to
 // close, or quit() was called. Called at the top of the loop, before the
-// first frame is drawn.
+// first frame is drawn. With two earlier frames still on the GPU it first
+// waits for the older, so a program never runs more than two frames ahead
+// of the GPU, headless too.
 extern "gs_gfx_frame" fn frame_raw() -> bool;
 fn frame() -> bool {
     let running = frame_raw();
@@ -377,6 +379,10 @@ fn screen_size() -> int2 {
 extern "gs_gfx_time" fn time() -> f64;               // seconds since open
 extern "gs_gfx_delta_time" fn delta_time() -> f64;   // seconds the last frame took
 extern "gs_gfx_frame_count" fn frame_count() -> i64;
+// How many frames the GPU had not finished when the last frame() submitted
+// its own, that one included: at most 2, since frame() waits for the older
+// of two still running before it submits another.
+extern "gs_gfx_frames_in_flight" fn frames_in_flight() -> i64;
 // How many times gfx has been opened in this process: handles made before it
 // last changed were released by close().
 extern "gs_gfx_open_count" fn open_count() -> i64;

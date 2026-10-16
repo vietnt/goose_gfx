@@ -193,6 +193,12 @@ typedef struct {
 
     gfx_table buffers, textures, samplers, pipelines, computes, readbacks;
     int readbacks_pending;              /* recorded and not yet submitted */
+    /* The fences of frame submits the GPU may not have done, oldest first,
+       and how many there were, its own included, when the last frame()
+       submitted. */
+    gfx_fence *in_flight[2];
+    int nin_flight;
+    int64_t frames_in_flight;
     gfx_shader **shaders;
     int nshaders, shaders_cap;
 

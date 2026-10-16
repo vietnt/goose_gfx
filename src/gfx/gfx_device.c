@@ -219,8 +219,17 @@ bool gfx_fence_wait(gfx_fence *f) {
     return f->signaled || gfx_sdl_fail("waiting for the GPU");
 }
 
+/* SDL cleans up after a command buffer (takes back its uniform buffers,
+   lets the textures it used be cycled into again) only when it sees the
+   buffer's fence signaled, in a later submit or a fence wait. A fence
+   released before then goes back to SDL's pool, the next submit resets it,
+   and the buffer is never cleaned up: frames paced by querying fences would
+   leak one each. So the last owner waits on the fence before releasing it,
+   which is instant once it is done, as every fence let go before close()
+   is. */
 void gfx_fence_drop(gfx_fence *f) {
     if (!f || --f->refs > 0) return;
+    SDL_WaitForGPUFences(gfx.dev, true, &f->fence, 1);
     SDL_ReleaseGPUFence(gfx.dev, f->fence);
     free(f);
 }
@@ -499,6 +508,8 @@ void gs_gfx_close(void) {
         gfx.cpass = NULL;
         gfx_submit();
         SDL_WaitForGPUIdle(gfx.dev);
+        for (int i = 0; i < gfx.nin_flight; i++) gfx_fence_drop(gfx.in_flight[i]);
+        gfx.nin_flight = 0;
         gfx_release_pipelines();
         gfx_release_resources();
         if (gfx.window) SDL_ReleaseWindowFromGPUDevice(gfx.dev, gfx.window);
@@ -662,6 +673,31 @@ static void gfx_focus(bool focused) {
     gfx_event(focused ? GS_GFX_EVENT_FOCUS_GAINED : GS_GFX_EVENT_FOCUS_LOST);
 }
 
+/* Ends a frame's commands as Rome's renderer and SDL's swapchain do: at
+   most two frame submits on the GPU at once. Done ones are let go; with two
+   still running, this waits for the older before submitting, so a program
+   drawing faster than the GPU (headless, with nothing else to hold it
+   back) waits rather than queueing work and memory without end. */
+static void gfx_frame_submit(void) {
+    int n = 0;
+    for (int i = 0; i < gfx.nin_flight; i++) {
+        if (gfx_fence_done(gfx.in_flight[i])) gfx_fence_drop(gfx.in_flight[i]);
+        else gfx.in_flight[n++] = gfx.in_flight[i];
+    }
+    gfx.nin_flight = n;
+    if (gfx.nin_flight == 2) {
+        gfx_fence_wait(gfx.in_flight[0]);
+        gfx_fence_drop(gfx.in_flight[0]);
+        gfx.in_flight[0] = gfx.in_flight[1];
+        gfx.nin_flight = 1;
+    }
+    gfx_fence *f = gfx_submit_fenced();
+    if (f) gfx.in_flight[gfx.nin_flight++] = f;
+    gfx.frames_in_flight = gfx.nin_flight;
+}
+
+int64_t gs_gfx_frames_in_flight(void) { return gfx.frames_in_flight; }
+
 uint8_t gs_gfx_frame(void) {
     if (!gfx_need_device("frame")) return 0;
     if (gfx.pass || gfx.cpass) {
@@ -670,7 +706,7 @@ uint8_t gs_gfx_frame(void) {
     }
     /* The first call starts the first frame; every later one ends one. */
     if (gfx.window && gfx.frames > 0) gfx_present();
-    gfx_submit();
+    gfx_frame_submit();
     memset(gfx.pressed_keys, 0, sizeof gfx.pressed_keys);
     memset(gfx.released_keys, 0, sizeof gfx.released_keys);
     gfx.pressed_buttons = gfx.released_buttons = 0;

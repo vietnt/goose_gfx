@@ -131,6 +131,7 @@ typedef struct {
     X(double, gs_gfx_time, (void)) \
     X(double, gs_gfx_delta_time, (void)) \
     X(int64_t, gs_gfx_frame_count, (void)) \
+    X(int64_t, gs_gfx_frames_in_flight, (void)) \
     X(int64_t, gs_gfx_open_count, (void)) \
     /* Input. */ \
     X(uint8_t, gs_gfx_key_down, (gs_gfx_bytes name)) \
