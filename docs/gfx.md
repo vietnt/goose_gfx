@@ -143,6 +143,15 @@ fields in the same order, and the same constant values.
   screen are ordinary texture downloads, and a minimized window (no swapchain
   image) only skips the blit. A headless device (`open_headless`, or `open`
   under `GOOSE_GFX_HEADLESS=1`) has the same screen and no window.
+* **At most two frames are on the GPU.** `frame()` submits each frame with
+  a fence and, with two earlier ones still running, waits for the older
+  before submitting, headless as well as windowed; `frames_in_flight()`
+  says how many were running at the last submit. A fence is waited on
+  before it is released, instant once it is done: SDL cleans up after a
+  command buffer (its uniform buffers, the textures it used, which cycling
+  reuses) only when it sees the buffer's fence signaled, and a fence
+  released after a query alone is reset by the next submit first, so that
+  buffer would never be cleaned up.
 * **Everything is in pixels.** A window always asks for the display's full
   pixel density, so on a high-density display its screen has more pixels
   than its size in the display's coordinates, which SDL gives the mouse in:
@@ -298,5 +307,13 @@ until CI or a Mac runs them.
   member offsets rather than size alone, and readback forms that return a
   fresh array of an explicit element type (`read_buffer<f32>(b, n)`) beside
   the ones that append to an out-array.
+* **Blocked outside goose_gfx.** These need SDL itself to change, and
+  wait for it: GPU timestamps (SDL_GPU has no timestamp queries), GPU
+  memory budget and usage (no query either), copies from a buffer into a
+  texture on the GPU (SDL_GPU uploads into textures from transfer buffers
+  only), and compressed-texture downloads on Direct3D 12 (above). Shader
+  built-ins that `embed_shader`'s GLSL front end does not take yet
+  (`gl_FragDepth`, `textureQueryLod`, `textureGather`, `gl_FrontFacing`,
+  `gl_SampleID`) need the Goose compiler to change, not this layer.
 * **A 2D and 3D immediate-mode layer in Goose** on top of this one, as
   Lobster has, and shader hot reload.
