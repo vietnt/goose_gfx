@@ -167,7 +167,13 @@ fields in the same order, and the same constant values.
   a command buffer of their own; any other upload, readback or mip generation
   is recorded in the frame's command buffer, and so happens between passes. A
   rewrite of a whole buffer lets SDL cycle it rather than wait for a draw still
-  using it. Readback submits and waits.
+  using it. A readback is
+  recorded the same way, into a transfer buffer of its own, and is pending
+  until that command buffer is submitted; the submit's fence is shared by
+  every readback it carried, freed when the last lets go. `ready` polls
+  it, `take` waits on it (submitting first, if the readback is still
+  pending), copies the bytes out and frees the readback, and a blocking
+  `read_texture` or `read_buffer` is a readback taken at once.
 * **Depth reads back as f32.** SDL_GPU cannot download a depth texture on
   every backend (Direct3D 12 copies depth only as a whole subresource), so
   `read_texture` on one draws the region into an R32F target, a full-screen

@@ -57,6 +57,23 @@ typedef struct {
     SDL_GPUSampler *smp;
 } gfx_sampler_slot;
 
+/* A submit's fence, shared by everything that waits on that submit: the
+   readbacks it carried. Freed when the last of them lets go. */
+typedef struct {
+    SDL_GPUFence *fence;
+    int refs;
+    bool signaled;
+} gfx_fence;
+
+/* A download recorded in the command buffer being recorded: pending until
+   that is submitted, then waiting on the submit's fence. */
+typedef struct {
+    SDL_GPUTransferBuffer *tb;
+    uint32_t size;
+    gfx_fence *fence;           /* NULL while pending */
+    bool failed;                /* its submit failed */
+} gfx_readback_slot;
+
 /* What a shader blob says about its stage (src/gfx/gfx_blob.h). */
 typedef struct {
     uint8_t stage;
@@ -174,7 +191,8 @@ typedef struct {
     char error[1024];
     int64_t misuse;
 
-    gfx_table buffers, textures, samplers, pipelines, computes;
+    gfx_table buffers, textures, samplers, pipelines, computes, readbacks;
+    int readbacks_pending;              /* recorded and not yet submitted */
     gfx_shader **shaders;
     int nshaders, shaders_cap;
 
@@ -207,6 +225,13 @@ SDL_GPUCommandBuffer *gfx_cmd(void);
 bool gfx_submit(void);
 /* Submits what has been recorded and waits until the GPU has done it all. */
 bool gfx_finish(void);
+/* Submits what has been recorded (an empty command buffer if nothing),
+   with a fence that the readbacks still pending now share; the caller
+   holds one reference. NULL if the submit failed, which fails them. */
+gfx_fence *gfx_submit_fenced(void);
+bool gfx_fence_wait(gfx_fence *f);
+bool gfx_fence_done(gfx_fence *f);
+void gfx_fence_drop(gfx_fence *f);
 
 /* The Goose format constants, mapped. */
 bool gfx_texture_format(int32_t format, SDL_GPUTextureFormat *out);

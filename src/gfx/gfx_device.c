@@ -143,6 +143,8 @@ static void gfx_init_tables(void) {
     gfx.pipelines.item_size = sizeof(gfx_pipeline_slot);
     gfx.computes.what = "compute pipeline";
     gfx.computes.item_size = sizeof(gfx_compute_slot);
+    gfx.readbacks.what = "readback";
+    gfx.readbacks.item_size = sizeof(gfx_readback_slot);
 }
 
 /* --- command buffers ------------------------------------------------------- */
@@ -158,22 +160,77 @@ SDL_GPUCommandBuffer *gfx_cmd(void) {
 
 bool gfx_submit(void) {
     if (!gfx.cmd) return true;
+    if (gfx.readbacks_pending) {
+        gfx_fence *f = gfx_submit_fenced();
+        gfx_fence_drop(f);
+        return f != NULL;
+    }
     SDL_GPUCommandBuffer *cb = gfx.cmd;
     gfx.cmd = NULL;
     return SDL_SubmitGPUCommandBuffer(cb) || gfx_sdl_fail("submitting commands");
 }
 
-bool gfx_finish(void) {
+static gfx_fence *gfx_attach_fence;
+
+static void gfx_attach(void *item) {
+    gfx_readback_slot *r = (gfx_readback_slot *)item;
+    if (r->fence || r->failed) return;
+    if (gfx_attach_fence) {
+        r->fence = gfx_attach_fence;
+        gfx_attach_fence->refs++;
+    } else {
+        r->failed = true;
+    }
+}
+
+gfx_fence *gfx_submit_fenced(void) {
     /* An empty command buffer's fence still follows all earlier work on the
-       queue, which is what waiting here is for. */
+       queue. */
     SDL_GPUCommandBuffer *cb = gfx_cmd();
-    if (!cb) return false;
-    gfx.cmd = NULL;
-    SDL_GPUFence *fence = SDL_SubmitGPUCommandBufferAndAcquireFence(cb);
-    if (!fence) return gfx_sdl_fail("submitting commands");
-    bool ok = SDL_WaitForGPUFences(gfx.dev, true, &fence, 1);
-    SDL_ReleaseGPUFence(gfx.dev, fence);
-    return ok || gfx_sdl_fail("waiting for the GPU");
+    gfx_fence *f = NULL;
+    if (cb) {
+        gfx.cmd = NULL;
+        SDL_GPUFence *fence = SDL_SubmitGPUCommandBufferAndAcquireFence(cb);
+        if (fence) {
+            f = (gfx_fence *)calloc(1, sizeof *f);
+            f->fence = fence;
+            f->refs = 1;
+        } else {
+            gfx_sdl_fail("submitting commands");
+        }
+    }
+    if (gfx.readbacks_pending) {
+        gfx_attach_fence = f;
+        gfx_table_each(&gfx.readbacks, gfx_attach);
+        gfx_attach_fence = NULL;
+        gfx.readbacks_pending = 0;
+    }
+    return f;
+}
+
+bool gfx_fence_done(gfx_fence *f) {
+    if (!f->signaled) f->signaled = SDL_QueryGPUFence(gfx.dev, f->fence);
+    return f->signaled;
+}
+
+bool gfx_fence_wait(gfx_fence *f) {
+    if (f->signaled) return true;
+    f->signaled = SDL_WaitForGPUFences(gfx.dev, true, &f->fence, 1);
+    return f->signaled || gfx_sdl_fail("waiting for the GPU");
+}
+
+void gfx_fence_drop(gfx_fence *f) {
+    if (!f || --f->refs > 0) return;
+    SDL_ReleaseGPUFence(gfx.dev, f->fence);
+    free(f);
+}
+
+bool gfx_finish(void) {
+    gfx_fence *f = gfx_submit_fenced();
+    if (!f) return false;
+    bool ok = gfx_fence_wait(f);
+    gfx_fence_drop(f);
+    return ok;
 }
 
 void gs_gfx_flush(void) {

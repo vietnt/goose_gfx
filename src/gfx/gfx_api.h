@@ -38,6 +38,7 @@ typedef struct { uint32_t id; } gs_gfx_texture;
 typedef struct { uint32_t id; } gs_gfx_sampler;
 typedef struct { uint32_t id; } gs_gfx_pipeline;
 typedef struct { uint32_t id; } gs_gfx_compute_pipeline;
+typedef struct { uint32_t id; } gs_gfx_readback;
 
 /* One input event of a frame, in the order they came: the fields a kind has
    are the ones that mean something for it. */
@@ -169,6 +170,13 @@ typedef struct {
     X(uint8_t, gs_gfx_update_texture, (gs_gfx_texture t, const gs_gfx_region *region, gs_gfx_bytes data)) \
     X(uint8_t, gs_gfx_read_texture, (gs_gfx_texture t, const gs_gfx_region *region, gs_gfx_bytes out)) \
     X(int64_t, gs_gfx_region_size, (gs_gfx_texture t, const gs_gfx_region *region)) \
+    /* Readbacks that do not wait. */ \
+    X(gs_gfx_readback, gs_gfx_read_texture_async, (gs_gfx_texture t, const gs_gfx_region *region)) \
+    X(gs_gfx_readback, gs_gfx_read_buffer_async, (gs_gfx_buffer b, int64_t offset, int64_t size)) \
+    X(uint8_t, gs_gfx_readback_ready, (gs_gfx_readback r)) \
+    X(int64_t, gs_gfx_readback_size, (gs_gfx_readback r)) \
+    X(uint8_t, gs_gfx_readback_take, (gs_gfx_readback r, gs_gfx_bytes out)) \
+    X(void, gs_gfx_release_readback, (gs_gfx_readback r)) \
     X(uint8_t, gs_gfx_save_png, (gs_gfx_texture t, gs_gfx_bytes path)) \
     X(void, gs_gfx_generate_mips, (gs_gfx_texture t)) \
     X(uint8_t, gs_gfx_texture_info, (gs_gfx_texture t, gs_gfx_texture_desc *out)) \

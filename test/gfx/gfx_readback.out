@@ -1,0 +1,14 @@
+before any submit: ready false false, sizes 8 4
+second, taken first: 0,0,255,255
+first, ready after the second's take: true
+first: 255,0,0,255 255,0,0,255
+buffer before flush: ready false
+buffer after flush: ready true
+buffer bytes 4 to 12 as asked for: 20 30
+buffer now: 1 2 3 4
+pixel 2 of a released texture: 51,102,153,255
+pixel 1 of a released texture: 51,102,153,255
+pixel 0 of a released texture: 51,102,153,255
+depth: 0.25 1.0
+drawn before the depth read: 51,153,255,255 0,0,0,255
+drawn after it, uniforms not pushed again: 51,153,255,255 0,0,0,0

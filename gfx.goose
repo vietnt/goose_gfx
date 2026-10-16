@@ -204,6 +204,8 @@ struct Texture { id: u32 }
 struct Sampler { id: u32 }
 struct Pipeline { id: u32 }
 struct ComputePipeline { id: u32 }
+// A read back that does not wait (read_texture_async, read_buffer_async).
+struct Readback { id: u32 }
 
 // Field defaults cannot name the constants above (a default may run before
 // any global is initialized), so they spell the values, and say which.
@@ -588,7 +590,8 @@ struct DepthReader { opened: i64, pipeline: Pipeline, sampler: Sampler }
 var depth_reader = DepthReader { 0, Pipeline { 0 }, Sampler { 0 } };
 
 // An R32F texture holding `region` of depth texture `t`, drawn into it in
-// the command buffer being recorded; Texture { 0 } when `t` is not a depth
+// the command buffer being recorded, to be read as `bytes` bytes (-1: any);
+// Texture { 0 } when `t` is not a depth
 // texture this can read, which read_texture_into then reports. The region's
 // origin comes from a vertex buffer, not as uniforms, so the uniforms the
 // program pushed stay as they were: vertex buffer 0, the same at each of the
@@ -604,7 +607,7 @@ fn depth_copy(t: Texture, region: Region, bytes: i64) -> Texture {
     let x = if region.w == 0 { 0 } else { region.x };
     let y = if region.w == 0 { 0 } else { region.y };
     if x < 0 || y < 0 || w < 1 || h < 1 || x + w > info.width || y + h > info.height ||
-       bytes != 4 * w as i64 * h as i64 {
+       (bytes >= 0 && bytes != 4 * w as i64 * h as i64) {
         return Texture { 0 };
     }
     if depth_reader.opened != open_count() {
@@ -661,6 +664,61 @@ fn read_pixels(t: Texture) -> u8[>..] {
     read_texture(t, px);
     return px;
 }
+// --- read backs that do not wait ---------------------------------------------
+// A read back asked for here is recorded where it is asked for, after the
+// work before it, and is not waited for: frame() or flush() submits it, and
+// ready() says when the GPU has done it. take() then gives its bytes, as
+// read_texture and read_buffer would have given them then, and frees it;
+// one not ready yet is waited for, and one not submitted yet is submitted
+// first. Not inside a pass. release() drops one not wanted any more. Like
+// every handle, a Readback does not outlive close().
+extern "gs_gfx_read_texture_async" fn read_texture_async_raw(t: Texture, region: const Region&)
+    -> Readback;
+fn read_texture_async(t: Texture, region: Region) -> Readback {
+    let target = depth_copy(t, region, -1);
+    let all = Region {};
+    let r = if target.id != 0 { read_texture_async_raw(target, all) }
+            else { read_texture_async_raw(t, region) };
+    if target.id != 0 { release(target); }
+    check();
+    r
+}
+// The whole of mip 0 of layer 0.
+fn read_texture_async(t: Texture) -> Readback { read_texture_async(t, Region {}) }
+extern "gs_gfx_read_buffer_async" fn read_buffer_async_raw(b: Buffer, offset: i64, size: i64)
+    -> Readback;
+fn read_buffer_async(b: Buffer, offset: i64, size: i64) -> Readback {
+    let r = read_buffer_async_raw(b, offset, size);
+    check();
+    r
+}
+extern "gs_gfx_readback_ready" fn ready(r: Readback) -> bool;
+// The bytes the readback gives.
+extern "gs_gfx_readback_size" fn readback_size(r: Readback) -> i64;
+extern "gs_gfx_readback_take" fn take_raw(r: Readback, out: u8[:]) -> bool;
+// Into `out`, readback_size(r) bytes.
+fn take_into(r: Readback, out: u8[:]) -> bool {
+    let ok = take_raw(r, out);
+    check();
+    ok
+}
+// Its bytes, fresh.
+fn take(r: Readback) -> u8[>..] {
+    var raw: u8[>..] = [];
+    raw.resize(readback_size(r), 0);
+    take_into(r, raw);
+    return raw;
+}
+// Appends its bytes to `out` as the elements of out's type.
+fn take<T>(r: Readback, out: T[>..]&) -> bool {
+    var raw: u8[>..] = [];
+    raw.resize(readback_size(r), 0);
+    let ok = take_into(r, raw);
+    append_as(raw, out);
+    ok
+}
+extern "gs_gfx_release_readback" fn release(r: Readback);
+
 // An RGBA8 or BGRA8 texture's mip 0 as a PNG file; the screen as it is
 // shown, opaque.
 extern "gs_gfx_save_png" fn save_png_raw(t: Texture, path: const u8[:]) -> bool;

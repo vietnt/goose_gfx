@@ -197,33 +197,23 @@ uint8_t gs_gfx_update_buffer(gs_gfx_buffer b, int64_t offset, gs_gfx_bytes data)
                              whole, "update_buffer");
 }
 
-/* Reads back through a download buffer: the copy is recorded after all the
-   work so far, and this waits for the GPU to get through it. */
+static gs_gfx_readback gfx_request_buffer(gs_gfx_buffer b, int64_t offset, int64_t size,
+                                          const char *what);
+static bool gfx_take(gs_gfx_readback h, void *out, int64_t len, const char *what);
+
+/* A readback taken at once: the copy is recorded after all the work so
+   far, and this waits for the GPU to get through it. */
 uint8_t gs_gfx_read_buffer(gs_gfx_buffer b, int64_t offset, gs_gfx_bytes out) {
     if (!gfx_need_device("read_buffer")) return 0;
-    gfx_buffer_slot *s = gfx_buffer_slot_of(b);
-    if (!s) return 0;
-    if (offset < 0 || out.len < 0 || offset + out.len > (int64_t)s->size)
-        return gfx_misuse("read_buffer: %lld bytes at %lld are not all in a buffer of %u",
-                          (long long)out.len, (long long)offset, s->size);
-    if (!out.len) return 1;
-    SDL_GPUCommandBuffer *cb = gfx_copy_cmd(false, "read_buffer");
-    if (!cb) return 0;
-    SDL_GPUTransferBuffer *tb = gfx_transfer((uint32_t)out.len, false);
-    if (!tb) return 0;
-    SDL_GPUCopyPass *cp = SDL_BeginGPUCopyPass(cb);
-    SDL_GPUBufferRegion src = { s->buf, (Uint32)offset, (Uint32)out.len };
-    SDL_GPUTransferBufferLocation dst = { tb, 0 };
-    SDL_DownloadFromGPUBuffer(cp, &src, &dst);
-    SDL_EndGPUCopyPass(cp);
-    bool ok = gfx_finish();
-    if (ok) {
-        void *p = SDL_MapGPUTransferBuffer(gfx.dev, tb, false);
-        memcpy(out.data, p, (size_t)out.len);
-        SDL_UnmapGPUTransferBuffer(gfx.dev, tb);
+    if (!out.len) {
+        gfx_buffer_slot *s = gfx_buffer_slot_of(b);
+        if (s && (offset < 0 || offset > (int64_t)s->size))
+            return gfx_misuse("read_buffer: offset %lld is outside a buffer of %u",
+                              (long long)offset, s->size);
+        return s != NULL;
     }
-    SDL_ReleaseGPUTransferBuffer(gfx.dev, tb);
-    return ok;
+    gs_gfx_readback h = gfx_request_buffer(b, offset, out.len, "read_buffer");
+    return h.id && gfx_take(h, out.data, out.len, "read_buffer");
 }
 
 int64_t gs_gfx_buffer_size(gs_gfx_buffer b) {
@@ -461,28 +451,30 @@ uint8_t gs_gfx_update_texture(gs_gfx_texture t, const gs_gfx_region *region, gs_
     return gfx_upload_texture(&reg, s->format, data.data, (uint32_t)data.len, false, "update_texture");
 }
 
-/* The pixels of a texture region, into `out`, waiting for the GPU. */
-static bool gfx_download_texture(const SDL_GPUTextureRegion *reg, SDL_GPUTextureFormat format,
-                                 void *out, uint32_t len, const char *what) {
-    SDL_GPUCommandBuffer *cb = gfx_copy_cmd(false, what);
-    if (!cb) return false;
-    SDL_GPUTransferBuffer *tb = gfx_transfer(len, false);
-    if (!tb) return false;
-    SDL_GPUCopyPass *cp = SDL_BeginGPUCopyPass(cb);
-    SDL_GPUTextureTransferInfo dst;
-    SDL_zero(dst);
-    dst.transfer_buffer = tb;
-    gfx_transfer_layout(&dst, reg, format);
-    SDL_DownloadFromGPUTexture(cp, reg, &dst);
-    SDL_EndGPUCopyPass(cp);
-    bool ok = gfx_finish();
-    if (ok) {
-        void *p = SDL_MapGPUTransferBuffer(gfx.dev, tb, false);
-        memcpy(out, p, len);
-        SDL_UnmapGPUTransferBuffer(gfx.dev, tb);
+/* --- readbacks --------------------------------------------------------------
+   A download is recorded in the command buffer being recorded, after all the
+   work before it, into a transfer buffer of its own, and is pending until
+   that command buffer is submitted (by frame(), flush() or a take). Taking it
+   waits for that submit's fence; a blocking read is a request taken at once. */
+
+static gfx_readback_slot *gfx_readback_new(uint32_t size, gs_gfx_readback *h) {
+    SDL_GPUTransferBuffer *tb = gfx_transfer(size, false);
+    if (!tb) return NULL;
+    gfx_readback_slot *r = (gfx_readback_slot *)gfx_table_add(&gfx.readbacks, &h->id);
+    if (!r) {
+        SDL_ReleaseGPUTransferBuffer(gfx.dev, tb);
+        return NULL;
     }
-    SDL_ReleaseGPUTransferBuffer(gfx.dev, tb);
-    return ok;
+    r->tb = tb;
+    r->size = size;
+    gfx.readbacks_pending++;
+    return r;
+}
+
+static void gfx_readback_free(gfx_readback_slot *r) {
+    if (!r->fence && !r->failed) gfx.readbacks_pending--;
+    SDL_ReleaseGPUTransferBuffer(gfx.dev, r->tb);
+    gfx_fence_drop(r->fence);
 }
 
 static bool gfx_readable(gfx_texture_slot *s, const char *what) {
@@ -506,22 +498,132 @@ static bool gfx_depth_unreadable(gfx_texture_slot *s, const SDL_GPUTextureRegion
     return gfx_misuse("%s: a depth texture is read back from mip 0 of a 2D texture", what);
 }
 
-uint8_t gs_gfx_read_texture(gs_gfx_texture t, const gs_gfx_region *region, gs_gfx_bytes out) {
-    if (!gfx_need_device("read_texture")) return 0;
+/* Records the download of `region` of `t`; `len`, when not -1, is the
+   number of bytes the caller wants, a misuse if it is not the region's. */
+static gs_gfx_readback gfx_request_texture(gs_gfx_texture t, const gs_gfx_region *region,
+                                           int64_t len, const char *what) {
+    gs_gfx_readback h = { 0 };
     gfx_texture_slot *s = gfx_texture_slot_of(t);
-    if (!s || !gfx_readable(s, "read_texture")) return 0;
+    if (!s || !gfx_readable(s, what)) return h;
     SDL_GPUTextureRegion reg;
-    if (!gfx_region(s, region, &reg, "read_texture")) return 0;
-    if (gfx_is_depth(s->format)) return gfx_depth_unreadable(s, &reg, out.len, "read_texture");
-    if (!gfx_texture_bytes(s, &reg, out.len, "read_texture")) return 0;
+    if (!gfx_region(s, region, &reg, what)) return h;
+    int64_t size = gfx_region_bytes(s, &reg);
+    if (gfx_is_depth(s->format)) {
+        gfx_depth_unreadable(s, &reg, len < 0 ? 4 * (int64_t)reg.w * reg.h : len, what);
+        return h;
+    }
+    if (len >= 0 && !gfx_texture_bytes(s, &reg, len, what)) return h;
     /* SDL 3.4's Direct3D 12 download of a compressed texture copies the
        region's texel rows rather than its block rows out of its staging
        buffer, past the end of a tightly sized one: refused until SDL is
        fixed. */
-    if (gfx_block(s->format) > 1 && SDL_strcmp(SDL_GetGPUDeviceDriver(gfx.dev), "direct3d12") == 0)
-        return gfx_fail("read_texture: compressed textures cannot be read back on Direct3D 12 "
-                        "with SDL 3.4 (its download overruns); upload and sampling work");
-    return gfx_download_texture(&reg, s->format, out.data, (uint32_t)out.len, "read_texture");
+    if (gfx_block(s->format) > 1 && SDL_strcmp(SDL_GetGPUDeviceDriver(gfx.dev), "direct3d12") == 0) {
+        gfx_fail("%s: compressed textures cannot be read back on Direct3D 12 with SDL 3.4 (its "
+                 "download overruns); upload and sampling work", what);
+        return h;
+    }
+    SDL_GPUCommandBuffer *cb = gfx_copy_cmd(false, what);
+    if (!cb) return h;
+    gfx_readback_slot *r = gfx_readback_new((uint32_t)size, &h);
+    if (!r) return h;
+    SDL_GPUCopyPass *cp = SDL_BeginGPUCopyPass(cb);
+    SDL_GPUTextureTransferInfo dst;
+    SDL_zero(dst);
+    dst.transfer_buffer = r->tb;
+    gfx_transfer_layout(&dst, &reg, s->format);
+    SDL_DownloadFromGPUTexture(cp, &reg, &dst);
+    SDL_EndGPUCopyPass(cp);
+    return h;
+}
+
+static gs_gfx_readback gfx_request_buffer(gs_gfx_buffer b, int64_t offset, int64_t size,
+                                          const char *what) {
+    gs_gfx_readback h = { 0 };
+    gfx_buffer_slot *s = gfx_buffer_slot_of(b);
+    if (!s) return h;
+    if (offset < 0 || size <= 0 || offset + size > (int64_t)s->size) {
+        gfx_misuse("%s: %lld bytes at %lld are not all in a buffer of %u", what, (long long)size,
+                   (long long)offset, s->size);
+        return h;
+    }
+    SDL_GPUCommandBuffer *cb = gfx_copy_cmd(false, what);
+    if (!cb) return h;
+    gfx_readback_slot *r = gfx_readback_new((uint32_t)size, &h);
+    if (!r) return h;
+    SDL_GPUCopyPass *cp = SDL_BeginGPUCopyPass(cb);
+    SDL_GPUBufferRegion src = { s->buf, (Uint32)offset, (Uint32)size };
+    SDL_GPUTransferBufferLocation dst = { r->tb, 0 };
+    SDL_DownloadFromGPUBuffer(cp, &src, &dst);
+    SDL_EndGPUCopyPass(cp);
+    return h;
+}
+
+/* Waits for readback `h`, submitting it first if it is pending, copies it
+   to `out` and frees it. */
+static bool gfx_take(gs_gfx_readback h, void *out, int64_t len, const char *what) {
+    gfx_readback_slot *r = (gfx_readback_slot *)gfx_table_get(&gfx.readbacks, h.id);
+    if (!r) return false;
+    if (len != (int64_t)r->size)
+        return gfx_misuse("%s: %lld bytes for a readback of %u", what, (long long)len, r->size);
+    if (!r->fence && !r->failed) {
+        if (gfx.pass || gfx.cpass)
+            return gfx_misuse("%s of a readback not yet submitted, inside a %s pass: end the pass "
+                              "first", what, gfx.pass ? "render" : "compute");
+        gfx_fence_drop(gfx_submit_fenced());
+    }
+    bool ok = !r->failed && gfx_fence_wait(r->fence);
+    if (r->failed) gfx_fail("%s: the commands that read it back could not be submitted", what);
+    if (ok) {
+        void *p = SDL_MapGPUTransferBuffer(gfx.dev, r->tb, false);
+        memcpy(out, p, r->size);
+        SDL_UnmapGPUTransferBuffer(gfx.dev, r->tb);
+    }
+    gfx_readback_free(r);
+    gfx_table_remove(&gfx.readbacks, h.id);
+    return ok;
+}
+
+uint8_t gs_gfx_read_texture(gs_gfx_texture t, const gs_gfx_region *region, gs_gfx_bytes out) {
+    if (!gfx_need_device("read_texture")) return 0;
+    gs_gfx_readback h = gfx_request_texture(t, region, out.len, "read_texture");
+    return h.id && gfx_take(h, out.data, out.len, "read_texture");
+}
+
+gs_gfx_readback gs_gfx_read_texture_async(gs_gfx_texture t, const gs_gfx_region *region) {
+    gs_gfx_readback h = { 0 };
+    if (!gfx_need_device("read_texture_async")) return h;
+    return gfx_request_texture(t, region, -1, "read_texture_async");
+}
+
+gs_gfx_readback gs_gfx_read_buffer_async(gs_gfx_buffer b, int64_t offset, int64_t size) {
+    gs_gfx_readback h = { 0 };
+    if (!gfx_need_device("read_buffer_async")) return h;
+    return gfx_request_buffer(b, offset, size, "read_buffer_async");
+}
+
+uint8_t gs_gfx_readback_ready(gs_gfx_readback h) {
+    if (!gfx_need_device("ready")) return 0;
+    gfx_readback_slot *r = (gfx_readback_slot *)gfx_table_get(&gfx.readbacks, h.id);
+    if (!r) return 0;
+    return r->failed || (r->fence && gfx_fence_done(r->fence));
+}
+
+int64_t gs_gfx_readback_size(gs_gfx_readback h) {
+    gfx_readback_slot *r = (gfx_readback_slot *)gfx_table_find(&gfx.readbacks, h.id);
+    return r ? r->size : 0;
+}
+
+uint8_t gs_gfx_readback_take(gs_gfx_readback h, gs_gfx_bytes out) {
+    if (!gfx_need_device("take")) return 0;
+    return gfx_take(h, out.data, out.len, "take");
+}
+
+void gs_gfx_release_readback(gs_gfx_readback h) {
+    if (!gfx_need_device("release_readback")) return;
+    gfx_readback_slot *r = (gfx_readback_slot *)gfx_table_get(&gfx.readbacks, h.id);
+    if (!r) return;
+    gfx_readback_free(r);
+    gfx_table_remove(&gfx.readbacks, h.id);
 }
 
 int64_t gs_gfx_region_size(gs_gfx_texture t, const gs_gfx_region *region) {
@@ -551,7 +653,8 @@ uint8_t gs_gfx_save_png(gs_gfx_texture t, gs_gfx_bytes path) {
     if (!gfx_region(s, &r, &reg, "save_png")) return 0;
     uint32_t len = reg.w * reg.h * 4;
     uint8_t *pixels = (uint8_t *)malloc(len);
-    bool ok = gfx_download_texture(&reg, s->format, pixels, len, "save_png");
+    gs_gfx_readback rb = gfx_request_texture(t, &r, len, "save_png");
+    bool ok = rb.id && gfx_take(rb, pixels, len, "save_png");
     /* The screen is saved as it is shown: opaque, whatever alpha drawing
        left in it. */
     if (ok && t.id == gfx.screen.id)
@@ -735,11 +838,15 @@ static void gfx_free_sampler(void *item) {
     SDL_ReleaseGPUSampler(gfx.dev, ((gfx_sampler_slot *)item)->smp);
 }
 
+static void gfx_free_readback(void *item) { gfx_readback_free((gfx_readback_slot *)item); }
+
 void gfx_release_resources(void) {
     gfx_table_each(&gfx.buffers, gfx_free_buffer);
     gfx_table_each(&gfx.textures, gfx_free_texture);
     gfx_table_each(&gfx.samplers, gfx_free_sampler);
+    gfx_table_each(&gfx.readbacks, gfx_free_readback);
     gfx_table_clear(&gfx.buffers);
+    gfx_table_clear(&gfx.readbacks);
     gfx_table_clear(&gfx.textures);
     gfx_table_clear(&gfx.samplers);
 }
