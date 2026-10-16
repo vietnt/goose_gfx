@@ -5,7 +5,8 @@
 // transparent black (decoders round the thirds between endpoints
 // differently), BC3 alpha, BC4 and BC5 at their endpoints and the 0 and 255
 // of their six-value mode, and BC7 mode 6, whose interpolation the format
-// defines in integers.
+// defines in integers. Direct3D 12 refuses the raw reads, with
+// gfx_compressed.direct3d12.out.
 import gfx from "../..";
 import std;
 import os;
@@ -34,6 +35,18 @@ fn texels(px: u8[:], w: i64, channels: i64) -> u8[>..] {
         }
     }
     return out;
+}
+
+// Where SDL cannot download a compressed texture (Direct3D 12) the read is
+// refused, and the line says why.
+fn raw_read(what: const u8[:], t: gfx::Texture, region: gfx::Region, written: u8[:]) {
+    var raw: u8[>..] = [];
+    raw.resize(written.len, 0);
+    if gfx::read_texture(t, region, raw) {
+        print("raw: ", what, " as written ", same(raw, written));
+    } else {
+        print("raw: ", what, " refused: ", gfx::error());
+    }
 }
 
 fn same(a: u8[:], b: u8[:]) -> bool {
@@ -128,16 +141,9 @@ fn main() {
     print("raw: bc1 mip 2 is ", gfx::region_size(bc1_tex, gfx::Region { mip: 2 }), " bytes, ",
           "bc7 mip 0 ", gfx::region_size(bc7_tex, gfx::Region {}), ", its edge block ",
           gfx::region_size(bc7_tex, gfx::Region { mip: 1, x: 4, w: 2, h: 4 }));
-    var raw: u8[>..] = [];
-    raw.resize(8, 0);
-    gfx::read_texture(bc1_tex, gfx::Region { mip: 2 }, raw);
-    print("raw: bc1 mip 2 as written ", same(raw, bc1_mip2));
-    print("raw: bc7 mip 0 as written ", same(gfx::read_pixels(bc7_tex), bc7_mip0));
-    raw.resize(16, 0);
-    gfx::read_texture(bc7_tex, gfx::Region { mip: 1, x: 4, w: 2, h: 4 }, raw);
-    print("raw: bc7 edge block as written ", same(raw, bc7_edge));
-    raw.resize(16, 0);
-    gfx::read_texture(layers, gfx::Region { layer: 1 }, raw);
-    print("raw: bc7 layer 1 as written ", same(raw, bc7_layer1));
+    raw_read("bc1 mip 2", bc1_tex, gfx::Region { mip: 2 }, bc1_mip2);
+    raw_read("bc7 mip 0", bc7_tex, gfx::Region {}, bc7_mip0);
+    raw_read("bc7 edge block", bc7_tex, gfx::Region { mip: 1, x: 4, w: 2, h: 4 }, bc7_edge);
+    raw_read("bc7 layer 1", layers, gfx::Region { layer: 1 }, bc7_layer1);
     gfx::close();
 }
