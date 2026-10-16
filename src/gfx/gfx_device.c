@@ -150,9 +150,83 @@ static void gfx_init_tables(void) {
 
 /* --- command buffers ------------------------------------------------------- */
 
+/* The accumulator of `frame`'s timings, made if `make`; the oldest goes
+   when there is no room. */
+static int gfx_timed_frame(int64_t frame, bool make) {
+    for (int i = 0; i < gfx.ntimed_frames; i++)
+        if (gfx.timed_frames[i].frame == frame) return i;
+    if (!make) return -1;
+    if (gfx.ntimed_frames == GFX_MAX_TIMED_FRAMES) {
+        memmove(gfx.timed_frames, gfx.timed_frames + 1,
+                sizeof gfx.timed_frames[0] * (GFX_MAX_TIMED_FRAMES - 1));
+        gfx.ntimed_frames--;
+    }
+    int i = gfx.ntimed_frames++;
+    memset(&gfx.timed_frames[i], 0, sizeof gfx.timed_frames[i]);
+    gfx.timed_frames[i].frame = frame;
+    return i;
+}
+
+static SDL_GPUCommandBuffer *gfx_acquire_cmd(void) {
+    if (!gfx.timing) return SDL_AcquireGPUCommandBuffer(gfx.dev);
+    int f = gfx_timed_frame(gfx.frames, true);
+    if (gfx.ntimed == GFX_MAX_TIMED) {
+        gfx.timed_frames[f].bad = true;
+        return SDL_AcquireGPUCommandBuffer(gfx.dev);
+    }
+    Uint64 id = 0;
+    SDL_GPUCommandBuffer *cb = SDL_AcquireGPUTimedCommandBuffer(gfx.dev, &id);
+    if (cb) {
+        gfx.timed[gfx.ntimed].id = id;
+        gfx.timed[gfx.ntimed].frame = gfx.frames;
+        gfx.ntimed++;
+        gfx.timed_frames[f].pending++;
+    }
+    return cb;
+}
+
+/* Takes in the timings that have arrived, and makes gpu_time the newest
+   finished frame's whose timings have all arrived. */
+void gfx_poll_timing(void) {
+    if (!gfx.timing) return;
+    for (;;) {
+        SDL_GPUCommandBufferTimingResult results[16];
+        Uint32 n = 0;
+        if (!SDL_PollGPUCommandBufferTiming(gfx.dev, results, 16, &n) || n == 0) break;
+        for (Uint32 r = 0; r < n; r++) {
+            int t = 0;
+            while (t < gfx.ntimed && gfx.timed[t].id != results[r].sample_id) t++;
+            if (t == gfx.ntimed) continue;
+            int f = gfx_timed_frame(gfx.timed[t].frame, false);
+            gfx.timed[t] = gfx.timed[--gfx.ntimed];
+            if (f < 0) continue;
+            gfx.timed_frames[f].pending--;
+            if (results[r].status == SDL_GPU_COMMANDBUFFER_TIMING_STATUS_OK)
+                gfx.timed_frames[f].ns += results[r].duration_ns;
+            else
+                gfx.timed_frames[f].bad = true;
+        }
+    }
+    for (int i = 0; i < gfx.ntimed_frames;) {
+        if (gfx.timed_frames[i].frame >= gfx.frames || gfx.timed_frames[i].pending > 0) {
+            i++;
+            continue;
+        }
+        if (!gfx.timed_frames[i].bad && gfx.timed_frames[i].frame > gfx.gpu_time_frame) {
+            gfx.gpu_time = (double)gfx.timed_frames[i].ns / 1e9;
+            gfx.gpu_time_frame = gfx.timed_frames[i].frame;
+        }
+        memmove(gfx.timed_frames + i, gfx.timed_frames + i + 1,
+                sizeof gfx.timed_frames[0] * (size_t)(gfx.ntimed_frames - i - 1));
+        gfx.ntimed_frames--;
+    }
+}
+
+double gs_gfx_gpu_time(void) { return gfx.dev ? gfx.gpu_time : -1.0; }
+
 SDL_GPUCommandBuffer *gfx_cmd(void) {
     if (!gfx.cmd) {
-        gfx.cmd = SDL_AcquireGPUCommandBuffer(gfx.dev);
+        gfx.cmd = gfx_acquire_cmd();
         if (!gfx.cmd) gfx_sdl_fail("acquiring a command buffer");
         memset(gfx.uniforms_pushed, 0, sizeof gfx.uniforms_pushed);
         for (int i = 0; gfx.cmd && i < gfx.ngroups; i++)
@@ -318,6 +392,7 @@ void gs_gfx_flush(void) {
         return;
     }
     gfx_finish();
+    gfx_poll_timing();
 }
 
 /* --- the screen -------------------------------------------------------------- */
@@ -629,6 +704,12 @@ static bool gfx_start(bool windowed, gs_gfx_bytes title, int64_t width, int64_t 
         memcpy(gfx.error, why, sizeof why);
         return false;
     }
+    SDL_GPUCommandBufferTimingCapabilities timing;
+    SDL_zero(timing);
+    gfx.timing = SDL_GetGPUCommandBufferTimingCapabilities(gfx.dev, &timing) &&
+                 timing.supports_timing;
+    gfx.gpu_time = -1.0;
+    gfx.gpu_time_frame = -1;
     gfx.start_ns = gfx.last_ns = SDL_GetTicksNS();
     gfx.inject_event = SDL_RegisterEvents(1);
     gfx_opens++;
@@ -958,6 +1039,11 @@ uint8_t gs_gfx_frame(void) {
     gfx.delta = (double)(now - gfx.last_ns) / 1e9;
     gfx.last_ns = now;
     gfx.frames++;
+    if (gfx.timing) {
+        Uint64 id;
+        SDL_BeginGPUCommandBufferTimingFrame(gfx.dev, &id);
+    }
+    gfx_poll_timing();
     return !gfx.quit;
 }
 

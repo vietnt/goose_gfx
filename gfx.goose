@@ -501,6 +501,10 @@ extern "gs_gfx_frame_count" fn frame_count() -> i64;
 // its own, that one included: at most 2, since frame() waits for the older
 // of two still running before it submits another.
 extern "gs_gfx_frames_in_flight" fn frames_in_flight() -> i64;
+// The seconds the GPU spent on the command buffers of a recent frame: the
+// newest finished one whose timings have all arrived, a frame or a few
+// behind. -1 until one has, or where the driver cannot time command buffers.
+extern "gs_gfx_gpu_time" fn gpu_time() -> f64;
 // How many times gfx has been opened in this process: handles made before it
 // last changed were released by close().
 extern "gs_gfx_open_count" fn open_count() -> i64;

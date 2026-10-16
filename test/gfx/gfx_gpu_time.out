@@ -1,0 +1,3 @@
+before any frame: -1.0
+arrived within 30 frames: true
+positive and under a second: true

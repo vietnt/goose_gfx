@@ -110,6 +110,10 @@ typedef struct {
 
 #define GFX_MAX_VARIANTS 8
 #define GFX_MAX_GROUPS 16
+/* Timed command buffers whose timing has not arrived, and frames waiting
+   for theirs: past these, command buffers go untimed. */
+#define GFX_MAX_TIMED 64
+#define GFX_MAX_TIMED_FRAMES 8
 
 typedef struct {
     gfx_shader *vs, *fs;
@@ -197,6 +201,18 @@ typedef struct {
     uint64_t start_ns, last_ns;
     double delta;
     int64_t frames;
+    /* Where SDL can time command buffers, each one gfx_cmd acquires is
+       timed, under the frame it is recorded in; frame() collects the
+       timings that have arrived, and once all of a finished frame's have,
+       their sum is gpu_time, in seconds (-1 until then). A frame with a
+       command buffer that went untimed or whose timing failed is skipped. */
+    bool timing;
+    struct { uint64_t id; int64_t frame; } timed[GFX_MAX_TIMED];
+    int ntimed;
+    struct { int64_t frame; int pending; bool bad; uint64_t ns; } timed_frames[GFX_MAX_TIMED_FRAMES];
+    int ntimed_frames;
+    int64_t gpu_time_frame;
+    double gpu_time;
 
     char error[1024];
     int64_t misuse;
@@ -233,6 +249,7 @@ bool gfx_sdl_fail(const char *what);
 
 /* True inside open() .. close(); a misuse to call `what` otherwise. */
 bool gfx_need_device(const char *what);
+void gfx_poll_timing(void);
 
 /* --- shared helpers ------------------------------------------------------- */
 
