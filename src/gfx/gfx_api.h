@@ -263,6 +263,7 @@ GS_GFX_API(GS_GFX_PROTO)
     X(i32, RGBA8UI, 13) \
     X(i32, RGB10A2, 14) \
     X(i32, RG11B10F, 15) \
+    X(i32, R16, 26) \
     X(i32, DEPTH16, 16) \
     X(i32, DEPTH24, 17) \
     X(i32, DEPTH32F, 18) \
