@@ -223,8 +223,10 @@ uint8_t gs_gfx_update_buffer(gs_gfx_buffer b, int64_t offset, gs_gfx_bytes data)
                              whole, "update_buffer");
 }
 
-/* Metal on macOS wants a buffer copy's offsets and size multiples of 4,
-   and Vulkan a copy within one buffer to two ranges that do not overlap. */
+/* Metal on macOS wants a buffer copy's offsets and size multiples of 4.
+   Direct3D 12's resource states cannot make one buffer a copy's source and
+   its destination at once, so a copy within one buffer goes through a
+   temporary buffer, on every backend alike. */
 uint8_t gs_gfx_copy_buffer(gs_gfx_buffer src, int64_t from, gs_gfx_buffer dst, int64_t to,
                            int64_t size) {
     const char *what = "copy_buffer";
@@ -243,10 +245,27 @@ uint8_t gs_gfx_copy_buffer(gs_gfx_buffer src, int64_t from, gs_gfx_buffer dst, i
     if (!size) return 1;
     SDL_GPUCommandBuffer *cb = gfx_copy_cmd(false, what);
     if (!cb) return 0;
+    SDL_GPUBuffer *tmp = NULL;
+    if (s == t) {
+        SDL_GPUBufferCreateInfo ci;
+        SDL_zero(ci);
+        ci.usage = (SDL_GPUBufferUsageFlags)s->usage;
+        ci.size = (Uint32)size;
+        tmp = SDL_CreateGPUBuffer(gfx.dev, &ci);
+        if (!tmp) return gfx_sdl_fail("creating a buffer for a copy within one buffer");
+    }
     SDL_GPUCopyPass *cp = SDL_BeginGPUCopyPass(cb);
     SDL_GPUBufferLocation a = { s->buf, (Uint32)from }, b = { t->buf, (Uint32)to };
-    SDL_CopyGPUBufferToBuffer(cp, &a, &b, (Uint32)size, false);
+    if (tmp) {
+        SDL_GPUBufferLocation m = { tmp, 0 };
+        SDL_CopyGPUBufferToBuffer(cp, &a, &m, (Uint32)size, false);
+        SDL_CopyGPUBufferToBuffer(cp, &m, &b, (Uint32)size, false);
+    } else {
+        SDL_CopyGPUBufferToBuffer(cp, &a, &b, (Uint32)size, false);
+    }
     SDL_EndGPUCopyPass(cp);
+    /* SDL frees it once the GPU is through the copies. */
+    if (tmp) SDL_ReleaseGPUBuffer(gfx.dev, tmp);
     return 1;
 }
 
