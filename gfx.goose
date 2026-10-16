@@ -508,6 +508,9 @@ extern "gs_gfx_frames_in_flight" fn frames_in_flight() -> i64;
 // The seconds the GPU spent on the command buffers of a recent frame: the
 // newest finished one whose timings have all arrived, a frame or a few
 // behind. -1 until one has, or where the driver cannot time command buffers.
+// Frames are timed from the first frame() after the first call on, since
+// collecting timings can cost pacing (Lavapipe waits for the GPU to go idle
+// to read them).
 extern "gs_gfx_gpu_time" fn gpu_time() -> f64;
 // How many times gfx has been opened in this process: handles made before it
 // last changed were released by close().

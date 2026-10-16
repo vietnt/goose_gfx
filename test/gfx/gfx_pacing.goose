@@ -7,6 +7,13 @@
 // Frames paced this way also stay within bounded memory, frames that clear
 // a depth target many times over included, each clear moving it to fresh
 // memory while the GPU may still use the old.
+// And with every frame's work at least 30 ms of the GPU's, so that the GPU
+// is what holds frames back, each steady frame() leaves 2 frames in flight:
+// nothing else frame() does may wait for the GPU to go idle, as reading
+// command buffer timings does on Lavapipe, which leaves frames coming in
+// bunches with the GPU drained between them. (How long one frame() takes
+// is no measure of this: a wait that wakes late leaves the next with
+// nothing to wait for.)
 import gfx from "../..";
 import std;
 import os;
@@ -92,5 +99,30 @@ fn main() {
     let grown = resident_mb() - before;
     print("memory grew by under 16 MB over 100 frames of 20 depth clears: ", before < 0 || grown < 16);
     if grown >= 16 { print("it grew by ", grown, " MB"); }
+
+    var iterations = 1000;
+    var work = 0.0;
+    while work < 0.03 && iterations < 1 << 22 {
+        iterations *= 2;
+        let t0 = gfx::time();
+        gfx::begin_pass(target, gfx::Texture { 0 }, float4 { 0.0, 0.0, 0.0, 1.0 });
+        gfx::bind(slow);
+        gfx::uniforms(gfx::FRAGMENT, 0, Work { iterations: iterations as i32 });
+        gfx::draw(3);
+        gfx::end_pass();
+        gfx::flush();
+        work = gfx::time() - t0;
+    }
+    var drained = 0;
+    for n in 14 {
+        gfx::frame();
+        if n >= 4 && gfx::frames_in_flight() < 2 { drained++; }
+        gfx::begin_pass(target, gfx::Texture { 0 }, float4 { 0.0, 0.0, 0.0, 1.0 });
+        gfx::bind(slow);
+        gfx::uniforms(gfx::FRAGMENT, 0, Work { iterations: iterations as i32 });
+        gfx::draw(3);
+        gfx::end_pass();
+    }
+    print("steady frames that left fewer than 2 frames in flight: ", drained, " of 10");
     gfx::close();
 }

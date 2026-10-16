@@ -222,7 +222,11 @@ void gfx_poll_timing(void) {
     }
 }
 
-double gs_gfx_gpu_time(void) { return gfx.dev ? gfx.gpu_time : -1.0; }
+double gs_gfx_gpu_time(void) {
+    if (!gfx.dev) return -1.0;
+    gfx.time_wanted = true;
+    return gfx.gpu_time;
+}
 
 SDL_GPUCommandBuffer *gfx_cmd(void) {
     if (!gfx.cmd) {
@@ -706,8 +710,8 @@ static bool gfx_start(bool windowed, gs_gfx_bytes title, int64_t width, int64_t 
     }
     SDL_GPUCommandBufferTimingCapabilities timing;
     SDL_zero(timing);
-    gfx.timing = SDL_GetGPUCommandBufferTimingCapabilities(gfx.dev, &timing) &&
-                 timing.supports_timing;
+    gfx.can_time = SDL_GetGPUCommandBufferTimingCapabilities(gfx.dev, &timing) &&
+                   timing.supports_timing;
     gfx.gpu_time = -1.0;
     gfx.gpu_time_frame = -1;
     gfx.start_ns = gfx.last_ns = SDL_GetTicksNS();
@@ -1039,6 +1043,7 @@ uint8_t gs_gfx_frame(void) {
     gfx.delta = (double)(now - gfx.last_ns) / 1e9;
     gfx.last_ns = now;
     gfx.frames++;
+    if (gfx.time_wanted && gfx.can_time) gfx.timing = true;
     if (gfx.timing) {
         Uint64 id;
         SDL_BeginGPUCommandBufferTimingFrame(gfx.dev, &id);
