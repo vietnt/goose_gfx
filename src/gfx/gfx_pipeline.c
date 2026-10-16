@@ -298,13 +298,15 @@ static bool gfx_vertex_layout(gfx_pipeline_slot *p) {
 
 /* --- graphics pipelines ------------------------------------------------------ */
 
-static SDL_GPUColorTargetBlendState gfx_blend(int32_t mode) {
+static SDL_GPUColorTargetBlendState gfx_blend(const gs_gfx_pipeline_desc *d) {
     SDL_GPUColorTargetBlendState b;
     SDL_zero(b);
     b.color_blend_op = SDL_GPU_BLENDOP_ADD;
     b.alpha_blend_op = SDL_GPU_BLENDOP_ADD;
-    b.enable_blend = mode != GS_GFX_BLEND_NONE;
-    switch (mode) {
+    b.enable_blend = d->blend != GS_GFX_BLEND_NONE;
+    b.color_write_mask = (SDL_GPUColorComponentFlags)d->write_mask;
+    b.enable_color_write_mask = d->write_mask != GS_GFX_WRITE_ALL;
+    switch (d->blend) {
         case GS_GFX_BLEND_ALPHA:
             b.src_color_blendfactor = SDL_GPU_BLENDFACTOR_SRC_ALPHA;
             b.dst_color_blendfactor = SDL_GPU_BLENDFACTOR_ONE_MINUS_SRC_ALPHA;
@@ -328,6 +330,14 @@ static SDL_GPUColorTargetBlendState gfx_blend(int32_t mode) {
             b.dst_color_blendfactor = SDL_GPU_BLENDFACTOR_ZERO;
             b.src_alpha_blendfactor = SDL_GPU_BLENDFACTOR_ZERO;
             b.dst_alpha_blendfactor = SDL_GPU_BLENDFACTOR_ONE;
+            break;
+        case GS_GFX_BLEND_CUSTOM:
+            b.src_color_blendfactor = (SDL_GPUBlendFactor)d->blend_src;
+            b.dst_color_blendfactor = (SDL_GPUBlendFactor)d->blend_dst;
+            b.color_blend_op = (SDL_GPUBlendOp)d->blend_op;
+            b.src_alpha_blendfactor = (SDL_GPUBlendFactor)d->blend_src_alpha;
+            b.dst_alpha_blendfactor = (SDL_GPUBlendFactor)d->blend_dst_alpha;
+            b.alpha_blend_op = (SDL_GPUBlendOp)d->blend_op_alpha;
             break;
         default:
             break;
@@ -370,7 +380,7 @@ SDL_GPUGraphicsPipeline *gfx_pipeline_for(gfx_pipeline_slot *p, const gfx_target
     for (int i = 0; i < t->ncolor; i++) {
         SDL_zero(colors[i]);
         colors[i].format = t->color[i];
-        colors[i].blend_state = gfx_blend(d->blend);
+        colors[i].blend_state = gfx_blend(d);
     }
     ci.target_info.color_target_descriptions = colors;
     ci.target_info.num_color_targets = (Uint32)t->ncolor;
@@ -392,11 +402,28 @@ gs_gfx_pipeline gs_gfx_create_pipeline(gs_gfx_bytes vs, gs_gfx_bytes fs,
     gs_gfx_pipeline h = { 0 };
     if (!gfx_need_device("pipeline")) return h;
     const gs_gfx_pipeline_desc *d = desc;
-    if ((uint32_t)d->primitive > 4 || (uint32_t)d->cull > 2 || (uint32_t)d->blend > 4 ||
-        (uint32_t)d->depth_compare > 8 || d->instance_location > 15) {
-        gfx_misuse("a PipelineDesc with a primitive, cull, blend or compare that is not one of "
-                   "gfx's constants");
+    if ((uint32_t)d->primitive > 4 || (uint32_t)d->cull > 2 || (uint32_t)d->blend > 5 ||
+        (uint32_t)d->depth_compare > 8 || d->instance_location > 15 ||
+        (uint32_t)d->write_mask > 15) {
+        gfx_misuse("a PipelineDesc with a primitive, cull, blend, compare or write mask that is "
+                   "not one of gfx's constants");
         return h;
+    }
+    if (d->blend == GS_GFX_BLEND_CUSTOM) {
+        int32_t factors[4] = { d->blend_src, d->blend_dst, d->blend_src_alpha, d->blend_dst_alpha };
+        int32_t ops[2] = { d->blend_op, d->blend_op_alpha };
+        for (int i = 0; i < 4; i++) {
+            if (factors[i] < GS_GFX_FACTOR_ZERO || factors[i] > GS_GFX_FACTOR_SRC_ALPHA_SATURATE) {
+                gfx_misuse("BLEND_CUSTOM with a blend factor that is not a FACTOR_*");
+                return h;
+            }
+        }
+        for (int i = 0; i < 2; i++) {
+            if (ops[i] < GS_GFX_OP_ADD || ops[i] > GS_GFX_OP_MAX) {
+                gfx_misuse("BLEND_CUSTOM with a blend operation that is not an OP_*");
+                return h;
+            }
+        }
     }
     gfx_shader *v = gfx_get_shader(vs, GS_GFX_STAGE_VERTEX);
     gfx_shader *f = v ? gfx_get_shader(fs, GS_GFX_STAGE_FRAGMENT) : NULL;

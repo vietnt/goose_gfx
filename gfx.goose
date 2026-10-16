@@ -163,6 +163,33 @@ let BLEND_ALPHA: i32 = 1;
 let BLEND_ADD: i32 = 2;
 let BLEND_PREMULTIPLIED: i32 = 3;
 let BLEND_MULTIPLY: i32 = 4;
+let BLEND_CUSTOM: i32 = 5;      // PipelineDesc's blend_src ... blend_op_alpha
+// Blend factors and operations, for BLEND_CUSTOM. FACTOR_CONSTANT is the
+// pass's blend_constant(); OP_MIN and OP_MAX ignore the factors.
+let FACTOR_ZERO: i32 = 1;
+let FACTOR_ONE: i32 = 2;
+let FACTOR_SRC_COLOR: i32 = 3;
+let FACTOR_ONE_MINUS_SRC_COLOR: i32 = 4;
+let FACTOR_DST_COLOR: i32 = 5;
+let FACTOR_ONE_MINUS_DST_COLOR: i32 = 6;
+let FACTOR_SRC_ALPHA: i32 = 7;
+let FACTOR_ONE_MINUS_SRC_ALPHA: i32 = 8;
+let FACTOR_DST_ALPHA: i32 = 9;
+let FACTOR_ONE_MINUS_DST_ALPHA: i32 = 10;
+let FACTOR_CONSTANT: i32 = 11;
+let FACTOR_ONE_MINUS_CONSTANT: i32 = 12;
+let FACTOR_SRC_ALPHA_SATURATE: i32 = 13;
+let OP_ADD: i32 = 1;
+let OP_SUBTRACT: i32 = 2;           // source - destination
+let OP_REVERSE_SUBTRACT: i32 = 3;   // destination - source
+let OP_MIN: i32 = 4;
+let OP_MAX: i32 = 5;
+// The channels a draw writes (PipelineDesc.write_mask), combined with |.
+let WRITE_R: i32 = 1;
+let WRITE_G: i32 = 2;
+let WRITE_B: i32 = 4;
+let WRITE_A: i32 = 8;
+let WRITE_ALL: i32 = 15;
 
 // Vertex attribute formats, for PipelineDesc.formats: what a vertex buffer
 // holds for a shader input when that is not the input's own type as 32-bit
@@ -288,6 +315,16 @@ struct PipelineDesc {
     depth_bias: f32 = 0.0,
     depth_bias_slope: f32 = 0.0,
     formats: u8[16] = [0; 16],      // by location, a VERTEX_* override
+    // With blend BLEND_CUSTOM: result = src * blend_src (blend_op) dst *
+    // blend_dst for color, the _alpha ones for alpha. One blend and write
+    // mask for every target.
+    blend_src: i32 = 2,             // FACTOR_ONE
+    blend_dst: i32 = 1,             // FACTOR_ZERO
+    blend_op: i32 = 1,              // OP_ADD
+    blend_src_alpha: i32 = 2,
+    blend_dst_alpha: i32 = 1,
+    blend_op_alpha: i32 = 1,
+    write_mask: i32 = 15,           // WRITE_ALL
 }
 
 // One input event of the last frame. The fields a kind has are the ones
@@ -846,6 +883,10 @@ fn uniforms<T>(stage: i64, slot: i64, u: T) {
 extern "gs_gfx_viewport" fn viewport(x: f32, y: f32, w: f32, h: f32);
 // w == 0: the whole target.
 extern "gs_gfx_scissor" fn scissor(x: i64, y: i64, w: i64, h: i64);
+// The color FACTOR_CONSTANT and FACTOR_ONE_MINUS_CONSTANT blend by, for the
+// rest of the pass; each pass starts at 1, 1, 1, 1.
+extern "gs_gfx_blend_constant" fn blend_constant_raw(r: f32, g: f32, b: f32, a: f32);
+fn blend_constant(c: float4) { blend_constant_raw(c.x, c.y, c.z, c.w); }
 
 extern "gs_gfx_draw" fn draw(vertices: i64, instances: i64, first_vertex: i64,
                              first_instance: i64);

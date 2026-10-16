@@ -299,6 +299,15 @@ void gs_gfx_scissor(int64_t x, int64_t y, int64_t w, int64_t h) {
     SDL_SetGPUScissor(gfx.pass, &r);
 }
 
+void gs_gfx_blend_constant(float r, float g, float b, float a) {
+    if (!gfx.pass) {
+        gfx_misuse("blend_constant outside a render pass");
+        return;
+    }
+    SDL_FColor c = { r, g, b, a };
+    SDL_SetGPUBlendConstants(gfx.pass, c);
+}
+
 /* Checks that the shaders of `stage` get everything they read. */
 static bool gfx_stage_ready(int64_t stage, const gfx_shader_info *info, const char *what) {
     struct {

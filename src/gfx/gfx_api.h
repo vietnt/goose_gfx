@@ -99,6 +99,10 @@ typedef struct {
     /* Per location, the attribute format a vertex buffer supplies; 0: the
        shader input's own type, as f32/i32/u32 components. */
     uint8_t formats[16];
+    /* With blend BLEND_CUSTOM: SDL_GPUBlendFactor and SDL_GPUBlendOp values
+       for color and for alpha. */
+    int32_t blend_src, blend_dst, blend_op, blend_src_alpha, blend_dst_alpha, blend_op_alpha;
+    int32_t write_mask;         /* the WRITE_* channels a draw writes, of every target */
 } gs_gfx_pipeline_desc;
 
 typedef struct {
@@ -203,6 +207,7 @@ typedef struct {
     X(void, gs_gfx_push_uniforms, (int64_t stage, int64_t slot, gs_gfx_bytes data)) \
     X(void, gs_gfx_viewport, (float x, float y, float w, float h)) \
     X(void, gs_gfx_scissor, (int64_t x, int64_t y, int64_t w, int64_t h)) \
+    X(void, gs_gfx_blend_constant, (float r, float g, float b, float a)) \
     X(void, gs_gfx_draw, (int64_t vertices, int64_t instances, int64_t first_vertex, int64_t first_instance)) \
     X(void, gs_gfx_draw_indexed, (int64_t indices, int64_t instances, int64_t first_index, int64_t vertex_offset, int64_t first_instance)) \
     /* Compute. */ \
@@ -323,6 +328,33 @@ GS_GFX_API(GS_GFX_PROTO)
     X(i32, BLEND_ADD, 2) \
     X(i32, BLEND_PREMULTIPLIED, 3) \
     X(i32, BLEND_MULTIPLY, 4) \
+    X(i32, BLEND_CUSTOM, 5) \
+    /* Blend factors and operations, for BLEND_CUSTOM: SDL_GPUBlendFactor \
+       and SDL_GPUBlendOp. */ \
+    X(i32, FACTOR_ZERO, 1) \
+    X(i32, FACTOR_ONE, 2) \
+    X(i32, FACTOR_SRC_COLOR, 3) \
+    X(i32, FACTOR_ONE_MINUS_SRC_COLOR, 4) \
+    X(i32, FACTOR_DST_COLOR, 5) \
+    X(i32, FACTOR_ONE_MINUS_DST_COLOR, 6) \
+    X(i32, FACTOR_SRC_ALPHA, 7) \
+    X(i32, FACTOR_ONE_MINUS_SRC_ALPHA, 8) \
+    X(i32, FACTOR_DST_ALPHA, 9) \
+    X(i32, FACTOR_ONE_MINUS_DST_ALPHA, 10) \
+    X(i32, FACTOR_CONSTANT, 11) \
+    X(i32, FACTOR_ONE_MINUS_CONSTANT, 12) \
+    X(i32, FACTOR_SRC_ALPHA_SATURATE, 13) \
+    X(i32, OP_ADD, 1) \
+    X(i32, OP_SUBTRACT, 2) \
+    X(i32, OP_REVERSE_SUBTRACT, 3) \
+    X(i32, OP_MIN, 4) \
+    X(i32, OP_MAX, 5) \
+    /* Channels a draw writes: SDL_GPUColorComponentFlags. */ \
+    X(i32, WRITE_R, 1) \
+    X(i32, WRITE_G, 2) \
+    X(i32, WRITE_B, 4) \
+    X(i32, WRITE_A, 8) \
+    X(i32, WRITE_ALL, 15) \
     /* Vertex attribute formats, for PipelineDesc.formats. */ \
     X(u8, VERTEX_FLOAT, 1) \
     X(u8, VERTEX_FLOAT2, 2) \

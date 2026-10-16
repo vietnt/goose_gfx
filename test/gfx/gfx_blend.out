@@ -1,0 +1,9 @@
+src 60,180,20,100 over dst 200,100,40,160
+src - dst, alpha src: 0,80,0,100
+dst - src, alpha max: 140,0,20,160
+min, alpha dst: 60,100,20,160
+constant 0.5,0.25,0,1 and one minus it: 130,120,40,100
+constant as the pass starts: 60,180,20,100
+write mask r and a: 60,100,40,100
+write mask g, blending add: 200,255,40,160
+write mask none: 200,100,40,160
