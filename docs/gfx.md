@@ -207,6 +207,10 @@ fields in the same order, and the same constant values.
   packed one after another as a Goose struct lays out its fields, per vertex
   from buffer 0, from `instance_location` on per instance from buffer 1.
   `PipelineDesc.formats` overrides a location's format, for bytes as colors.
+  SDL's own vertex buffer slots are numbered with no gap, so a pipeline with
+  only per-instance inputs reads buffer 1 from SDL's slot 0; vertex buffers
+  are therefore bound into SDL at the draw, into the slots its pipeline
+  reads them from (`gfx_instance_only`).
 * **Copies are in program order.** A new resource's first contents go through
   a command buffer of their own; any other upload, readback or mip generation
   is recorded in the frame's command buffer, and so happens between passes. A

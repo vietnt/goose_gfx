@@ -118,6 +118,7 @@ typedef struct {
     SDL_GPUVertexBufferDescription vbufs[2];
     int nvbufs;
     uint32_t vbuf_mask;         /* which vertex buffer slots a draw needs */
+    int vbuf_from[2];           /* the bind_vertex_buffer slot each of vbufs reads */
     gfx_variant variants[GFX_MAX_VARIANTS];
     int nvariants;
 } gfx_pipeline_slot;
@@ -153,6 +154,9 @@ typedef struct {
     /* Bound slots, by stage, since the pass began; checked at a draw. */
     uint32_t samplers_bound[GFX_STAGES], textures_bound[GFX_STAGES], buffers_bound[GFX_STAGES];
     uint32_t vbufs_bound;
+    /* Vertex buffers by bind_vertex_buffer slot, and what SDL's own slots
+       hold, which a draw makes agree with its pipeline (vbuf_from). */
+    SDL_GPUBufferBinding vbufs[2], sdl_vbufs[2];
     bool index_bound;
     int compute_rw_textures, compute_rw_buffers;
     /* Uniform slots pushed, by stage, in this command buffer. */

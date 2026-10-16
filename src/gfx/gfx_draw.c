@@ -10,6 +10,7 @@ static void gfx_reset_bindings(void) {
     memset(gfx.textures_bound, 0, sizeof gfx.textures_bound);
     memset(gfx.buffers_bound, 0, sizeof gfx.buffers_bound);
     gfx.vbufs_bound = 0;
+    memset(gfx.sdl_vbufs, 0, sizeof gfx.sdl_vbufs);
     gfx.index_bound = false;
 }
 
@@ -153,8 +154,8 @@ void gs_gfx_bind_vertex_buffer(int64_t slot, gs_gfx_buffer b, int64_t offset) {
                    "BUFFER_VERTEX buffer", (long long)slot, (long long)offset);
         return;
     }
-    SDL_GPUBufferBinding bb = { s->buf, (Uint32)offset };
-    SDL_BindGPUVertexBuffers(gfx.pass, (Uint32)slot, &bb, 1);
+    /* Bound at the draw, into the SDL slot its pipeline reads it from. */
+    gfx.vbufs[slot] = (SDL_GPUBufferBinding){ s->buf, (Uint32)offset };
     gfx.vbufs_bound |= 1u << slot;
 }
 
@@ -328,8 +329,17 @@ static bool gfx_ready_to_draw(const char *what) {
     if (missing)
         return gfx_misuse("%s: the pipeline reads vertex buffer %d, which is not bound", what,
                           missing & 1 ? 0 : 1);
-    return gfx_stage_ready(GS_GFX_VERTEX, &p->vs->info, what) &&
-           gfx_stage_ready(GS_GFX_FRAGMENT, &p->fs->info, what);
+    if (!gfx_stage_ready(GS_GFX_VERTEX, &p->vs->info, what) ||
+        !gfx_stage_ready(GS_GFX_FRAGMENT, &p->fs->info, what))
+        return false;
+    for (int i = 0; i < p->nvbufs; i++) {
+        SDL_GPUBufferBinding want = gfx.vbufs[p->vbuf_from[i]];
+        if (gfx.sdl_vbufs[i].buffer != want.buffer || gfx.sdl_vbufs[i].offset != want.offset) {
+            SDL_BindGPUVertexBuffers(gfx.pass, (Uint32)i, &want, 1);
+            gfx.sdl_vbufs[i] = want;
+        }
+    }
+    return true;
 }
 
 void gs_gfx_draw(int64_t vertices, int64_t instances, int64_t first_vertex,

@@ -277,13 +277,21 @@ static bool gfx_vertex_layout(gfx_pipeline_slot *p) {
             offset[slot] += gfx_vertex_formats[fmt].size;
         }
     }
+    /* SDL's buffers are numbered from 0 with no gap: SDL counts the slots up
+       to the last one, and Direct3D 12 crashes on an empty slot 0 and
+       Vulkan reads a null buffer there. So with no per-vertex inputs the
+       per-instance buffer is SDL's slot 0. */
     for (int slot = 0; slot < 2; slot++) {
         if (!offset[slot]) continue;
-        SDL_GPUVertexBufferDescription *vb = &p->vbufs[p->nvbufs++];
-        vb->slot = (Uint32)slot;
+        int sdl_slot = p->nvbufs;
+        SDL_GPUVertexBufferDescription *vb = &p->vbufs[p->nvbufs];
+        p->vbuf_from[p->nvbufs++] = slot;
+        vb->slot = (Uint32)sdl_slot;
         vb->pitch = offset[slot];
         vb->input_rate = slot ? SDL_GPU_VERTEXINPUTRATE_INSTANCE : SDL_GPU_VERTEXINPUTRATE_VERTEX;
         p->vbuf_mask |= 1u << slot;
+        for (int i = 0; i < p->nattrs; i++)
+            if (p->attrs[i].buffer_slot == (Uint32)slot) p->attrs[i].buffer_slot = (Uint32)sdl_slot;
     }
     return true;
 }
