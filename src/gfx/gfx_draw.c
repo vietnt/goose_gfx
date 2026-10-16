@@ -371,7 +371,8 @@ void gs_gfx_draw_indexed(int64_t indices, int64_t instances, int64_t first_index
 
 /* --- compute ----------------------------------------------------------------- */
 
-uint8_t gs_gfx_begin_compute(gs_gfx_buffer_slice rw_buffers, gs_gfx_texture_slice rw_textures) {
+uint8_t gs_gfx_begin_compute(gs_gfx_buffer_slice rw_buffers, gs_gfx_texture_slice rw_textures,
+                             uint8_t cycle) {
     if (!gfx_need_device("begin_compute")) return 0;
     if (gfx.pass || gfx.cpass)
         return gfx_misuse("begin_compute inside a %s pass: end it first",
@@ -388,6 +389,7 @@ uint8_t gs_gfx_begin_compute(gs_gfx_buffer_slice rw_buffers, gs_gfx_texture_slic
                               "BUFFER_COMPUTE_WRITE", (long long)i);
         SDL_zero(bb[i]);
         bb[i].buffer = s->buf;
+        bb[i].cycle = cycle != 0;
     }
     for (int64_t i = 0; i < rw_textures.len; i++) {
         gfx_texture_slot *s = gfx_texture_slot_of(rw_textures.data[i]);
@@ -398,6 +400,7 @@ uint8_t gs_gfx_begin_compute(gs_gfx_buffer_slice rw_buffers, gs_gfx_texture_slic
                               "COMPUTE_WRITE or COMPUTE_READ_WRITE", (long long)i);
         SDL_zero(tb[i]);
         tb[i].texture = s->tex;
+        tb[i].cycle = cycle != 0;
     }
     SDL_GPUCommandBuffer *cb = gfx_cmd();
     if (!cb) return 0;

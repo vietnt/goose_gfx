@@ -835,12 +835,18 @@ fn draw_indexed_instanced(indices: i64, instances: i64) { draw_indexed(indices, 
 // --- compute -------------------------------------------------------------------
 
 // A compute pass writing these buffers and textures: the shader's
-// read-write storage resources, in binding order.
+// read-write storage resources, in binding order. With `cycle`, one an
+// earlier frame still reads may be given fresh memory rather than waited
+// for, so what the pass does not write of it is undefined: for a pass that
+// rewrites the whole of each, as a render pass's clear does.
 extern "gs_gfx_begin_compute" fn begin_compute(rw_buffers: const Buffer[:],
-                                               rw_textures: const Texture[:]) -> bool;
+                                               rw_textures: const Texture[:], cycle: bool) -> bool;
+fn begin_compute(rw_buffers: const Buffer[:], rw_textures: const Texture[:]) -> bool {
+    begin_compute(rw_buffers, rw_textures, false)
+}
 fn begin_compute(rw_buffers: const Buffer[:]) -> bool {
     let none: Texture[>..] = [];
-    begin_compute(rw_buffers, none)
+    begin_compute(rw_buffers, none, false)
 }
 extern "gs_gfx_end_compute" fn end_compute();
 extern "gs_gfx_bind_compute_pipeline" fn bind(p: ComputePipeline);

@@ -186,7 +186,11 @@ fields in the same order, and the same constant values.
   shows this block and these four textures as the whole difference. Rome's renderer cycles its cleared targets the
   same way. Clearing without cycling would give the memory back at the cost
   of the overlap (each frame's clear waiting for the last frame's reads of
-  that target), so frame() keeps it.
+  that target), so frame() keeps it. A compute pass cycles what it writes
+  only when asked (`begin_compute(buffers, textures, true)`), since what it
+  leaves unwritten is then undefined: for a pass that rewrites the whole of
+  each, as Rome's wind fields do and its macro weights do not
+  (`gfx_compute_cycle`).
 * **Everything is in pixels.** A window always asks for the display's full
   pixel density, so on a high-density display its screen has more pixels
   than its size in the display's coordinates, which SDL gives the mouse in:

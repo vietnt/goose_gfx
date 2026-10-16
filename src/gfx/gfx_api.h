@@ -204,7 +204,7 @@ typedef struct {
     X(void, gs_gfx_draw, (int64_t vertices, int64_t instances, int64_t first_vertex, int64_t first_instance)) \
     X(void, gs_gfx_draw_indexed, (int64_t indices, int64_t instances, int64_t first_index, int64_t vertex_offset, int64_t first_instance)) \
     /* Compute. */ \
-    X(uint8_t, gs_gfx_begin_compute, (gs_gfx_buffer_slice rw_buffers, gs_gfx_texture_slice rw_textures)) \
+    X(uint8_t, gs_gfx_begin_compute, (gs_gfx_buffer_slice rw_buffers, gs_gfx_texture_slice rw_textures, uint8_t cycle)) \
     X(void, gs_gfx_end_compute, (void)) \
     X(void, gs_gfx_bind_compute_pipeline, (gs_gfx_compute_pipeline p)) \
     X(void, gs_gfx_dispatch, (int64_t x, int64_t y, int64_t z))
