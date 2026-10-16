@@ -49,10 +49,11 @@ uint8_t gs_gfx_begin_pass(const gs_gfx_pass_desc *d) {
         ct[i].texture = s->tex;
         ct[i].mip_level = (Uint32)d->mip;
         ct[i].layer_or_depth_plane = (Uint32)d->layer;
-        ct[i].clear_color.r = d->color_value.x;
-        ct[i].clear_color.g = d->color_value.y;
-        ct[i].clear_color.b = d->color_value.z;
-        ct[i].clear_color.a = d->color_value.w;
+        gs_gfx_float4 v = d->clear_each ? d->color_values[i] : d->color_value;
+        ct[i].clear_color.r = v.x;
+        ct[i].clear_color.g = v.y;
+        ct[i].clear_color.b = v.z;
+        ct[i].clear_color.a = v.w;
         ct[i].load_op = d->clear_color ? SDL_GPU_LOADOP_CLEAR : SDL_GPU_LOADOP_LOAD;
         ct[i].store_op = SDL_GPU_STOREOP_STORE;
         /* Cleared anyway, so while an earlier frame still reads the old

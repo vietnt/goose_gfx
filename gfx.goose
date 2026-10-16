@@ -401,6 +401,8 @@ struct PassDesc {
     depth_value: f32 = 1.0,
     clear_stencil: bool = true,                 // a depth target's stencil, to stencil_value
     stencil_value: u8 = 0,
+    clear_each: bool = false,                   // color[i] clears to color_values[i], not color_value
+    color_values: float4[4] = [float4 { 0.0, 0.0, 0.0, 1.0 }; 4],
 }
 
 // --- device, window and frames -----------------------------------------------
