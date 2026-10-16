@@ -63,6 +63,14 @@ typedef struct { int32_t x, y; } gs_gfx_int2;
 typedef struct { float x, y; } gs_gfx_float2;
 typedef struct { float x, y, z, w; } gs_gfx_float4;
 
+/* What SDL can tell of the GPU's memory: architecture is a MEMORY_UNIFIED or
+   MEMORY_DEDICATED, 0 when unknown; bytes is a MEMORY_BUDGET or
+   MEMORY_CAPACITY as kind says, 0 bytes with kind 0. */
+typedef struct {
+    int32_t architecture, kind;
+    int64_t bytes;
+} gs_gfx_memory_info;
+
 typedef struct {
     int32_t kind, format, usage;
     int32_t width, height;
@@ -134,6 +142,7 @@ typedef struct {
     X(int64_t, gs_gfx_misuse_count, (void)) \
     X(int64_t, gs_gfx_driver, (gs_gfx_bytes out)) \
     X(int64_t, gs_gfx_present_mode, (void)) \
+    X(uint8_t, gs_gfx_gpu_memory, (gs_gfx_memory_info *out)) \
     X(uint8_t, gs_gfx_frame, (void)) \
     X(void, gs_gfx_quit, (void)) \
     X(void, gs_gfx_flush, (void)) \
@@ -251,6 +260,10 @@ GS_GFX_API(GS_GFX_PROTO)
     X(i32, PRESENT_VSYNC, 0) \
     X(i32, PRESENT_IMMEDIATE, 1) \
     X(i32, PRESENT_MAILBOX, 2) \
+    X(i32, MEMORY_UNIFIED, 1) \
+    X(i32, MEMORY_DEDICATED, 2) \
+    X(i32, MEMORY_BUDGET, 1) \
+    X(i32, MEMORY_CAPACITY, 2) \
     /* Shader stages. */ \
     X(i32, VERTEX, 0) \
     X(i32, FRAGMENT, 1) \

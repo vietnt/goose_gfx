@@ -61,6 +61,13 @@ let PRESENT_VSYNC: i32 = 0;
 let PRESENT_IMMEDIATE: i32 = 1;
 let PRESENT_MAILBOX: i32 = 2;
 
+// MemoryInfo: how the GPU's memory is laid out (0: unknown) ...
+let MEMORY_UNIFIED: i32 = 1;    // shared with the CPU
+let MEMORY_DEDICATED: i32 = 2;  // the GPU's own
+// ... and what its bytes count (0: nothing known).
+let MEMORY_BUDGET: i32 = 1;     // what the driver says the program may use
+let MEMORY_CAPACITY: i32 = 2;   // how much there is
+
 // Shader stages.
 let VERTEX: i32 = 0;
 let FRAGMENT: i32 = 1;
@@ -280,6 +287,13 @@ struct TextureDesc {
     samples: i32 = 1,
 }
 
+// What memory_info() reports.
+struct MemoryInfo {
+    architecture: i32 = 0,  // MEMORY_UNIFIED, MEMORY_DEDICATED, or 0: unknown
+    kind: i32 = 0,          // MEMORY_BUDGET, MEMORY_CAPACITY, or 0: no amount
+    bytes: i64 = 0,
+}
+
 // Part of one mip of one layer of a texture; w == 0 is the whole mip.
 struct Region {
     mip: i32 = 0,
@@ -438,6 +452,14 @@ fn driver() -> u8[>..] {
 // How the window's frames are presented: PRESENT_VSYNC unless NO_VSYNC or
 // IMMEDIATE asked for another the window has; -1 headless.
 extern "gs_gfx_present_mode" fn present_mode() -> i64;
+extern "gs_gfx_gpu_memory" fn memory_info_into(out: MemoryInfo&) -> bool;
+// What SDL can tell of the GPU's memory, for choosing how much to keep on
+// it: all zero when it can tell nothing.
+fn memory_info() -> MemoryInfo {
+    var info = MemoryInfo {};
+    memory_info_into(info);
+    info
+}
 
 // Ends the frame drawn since the last call, showing the screen in the
 // window, and handles the window's events: false once it has been asked to

@@ -685,6 +685,19 @@ void gs_gfx_close(void) {
 
 int64_t gs_gfx_present_mode(void) { return gfx.window ? (int64_t)gfx.present_mode : -1; }
 
+uint8_t gs_gfx_gpu_memory(gs_gfx_memory_info *out) {
+    memset(out, 0, sizeof *out);
+    if (!gfx_need_device("memory_info")) return 0;
+    SDL_GPUMemoryInfo info;
+    SDL_zero(info);
+    /* False where the backend can tell nothing, as Metal's can't yet. */
+    if (!SDL_GetGPUMemoryInfo(gfx.dev, &info)) return 0;
+    out->architecture = (int32_t)info.architecture;
+    out->kind = (int32_t)info.kind;
+    out->bytes = (int64_t)info.bytes;
+    return 1;
+}
+
 int64_t gs_gfx_driver(gs_gfx_bytes out) {
     const char *name = gfx.dev ? SDL_GetGPUDeviceDriver(gfx.dev) : "";
     if (!name) name = "";
