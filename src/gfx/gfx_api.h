@@ -192,6 +192,7 @@ typedef struct {
     X(gs_gfx_texture, gs_gfx_create_texture, (const gs_gfx_texture_desc *desc)) \
     X(gs_gfx_texture, gs_gfx_load_texture, (gs_gfx_bytes path, int64_t flags)) \
     X(uint8_t, gs_gfx_update_texture, (gs_gfx_texture t, const gs_gfx_region *region, gs_gfx_bytes data)) \
+    X(uint8_t, gs_gfx_copy_buffer_to_texture, (gs_gfx_buffer b, int64_t offset, gs_gfx_texture t, const gs_gfx_region *region)) \
     X(uint8_t, gs_gfx_read_texture, (gs_gfx_texture t, const gs_gfx_region *region, gs_gfx_bytes out)) \
     X(int64_t, gs_gfx_region_size, (gs_gfx_texture t, const gs_gfx_region *region)) \
     /* Readbacks that do not wait. */ \

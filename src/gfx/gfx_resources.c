@@ -477,6 +477,39 @@ uint8_t gs_gfx_update_texture(gs_gfx_texture t, const gs_gfx_region *region, gs_
     return gfx_upload_texture(&reg, s->format, data.data, (uint32_t)data.len, false, "update_texture");
 }
 
+uint8_t gs_gfx_copy_buffer_to_texture(gs_gfx_buffer b, int64_t offset, gs_gfx_texture t,
+                                      const gs_gfx_region *region) {
+    const char *what = "copy_buffer_to_texture";
+    if (!gfx_need_device(what)) return 0;
+    gfx_buffer_slot *bs = gfx_buffer_slot_of(b);
+    gfx_texture_slot *s = gfx_texture_slot_of(t);
+    if (!bs || !s) return 0;
+    if (s->desc.samples > 1) return gfx_misuse("%s: a multisampled texture", what);
+    if (gfx_is_depth(s->format)) return gfx_misuse("%s: a depth texture", what);
+    SDL_GPUTextureRegion reg;
+    if (!gfx_region(s, region, &reg, what)) return 0;
+    /* Vulkan wants the offset a multiple of 4 and of a texel's (or block's)
+       bytes. */
+    int64_t texel = (int64_t)SDL_GPUTextureFormatTexelBlockSize(s->format);
+    int64_t bytes = gfx_region_bytes(s, &reg);
+    if (offset < 0 || offset % 4 || offset % texel)
+        return gfx_misuse("%s: offset %lld is not a multiple of 4 and of the %lld bytes of a texel",
+                          what, (long long)offset, (long long)texel);
+    if (offset + bytes > (int64_t)bs->size)
+        return gfx_misuse("%s: %lld bytes from offset %lld of a %u-byte buffer", what,
+                          (long long)bytes, (long long)offset, bs->size);
+    SDL_GPUCommandBuffer *cb = gfx_copy_cmd(false, what);
+    if (!cb) return 0;
+    SDL_GPUCopyPass *cp = SDL_BeginGPUCopyPass(cb);
+    SDL_GPUBufferTextureCopyInfo src;
+    SDL_zero(src);
+    src.buffer = bs->buf;
+    src.offset = (Uint32)offset;
+    SDL_CopyGPUBufferToTexture(cp, &src, &reg, false);
+    SDL_EndGPUCopyPass(cp);
+    return 1;
+}
+
 /* --- readbacks --------------------------------------------------------------
    A download is recorded in the command buffer being recorded, after all the
    work before it, into a transfer buffer of its own, and is pending until

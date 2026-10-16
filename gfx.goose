@@ -693,6 +693,20 @@ fn update_texture(t: Texture, region: Region, data: const u8[:]) -> bool {
 }
 // The whole of mip 0 of layer 0: a 2D texture, or all of a 3D one.
 fn update_texture(t: Texture, data: const u8[:]) -> bool { update_texture(t, Region {}, data) }
+// Copies into `region` of `t` the bytes of `b` from `offset` on, laid out as
+// update_texture takes them, on the GPU and in order with the work recorded
+// around it, as when a compute pass has written the buffer. Not inside a
+// pass, nor into a depth or multisampled texture; `offset` is a multiple of
+// 4 and of a texel's bytes (a block's for a compressed format).
+extern "gs_gfx_copy_buffer_to_texture" fn copy_buffer_to_texture_region(b: Buffer, offset: i64,
+        t: Texture, region: const Region&) -> bool;
+fn copy_buffer_to_texture(b: Buffer, offset: i64, t: Texture, region: Region) -> bool {
+    copy_buffer_to_texture_region(b, offset, t, region)
+}
+// Into the whole of mip 0 of layer 0.
+fn copy_buffer_to_texture(b: Buffer, t: Texture) -> bool {
+    copy_buffer_to_texture(b, 0, t, Region {})
+}
 extern "gs_gfx_read_texture" fn read_texture_into(t: Texture, region: const Region&,
                                                   out: u8[:]) -> bool;
 // A depth texture reads back as one f32 a texel, D16 and D24 normalized to
