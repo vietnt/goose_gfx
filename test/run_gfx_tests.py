@@ -87,8 +87,11 @@ def check(name, how, code, out, err, expected, require_gpu, log):
     if NO_GPU in out or NO_GPU in err:
         return ("fail" if require_gpu else "skip"), f"{how}: no GPU device"
     reported = log.read_text(errors="replace") if log and log.exists() else ""
+    # Newer layers follow an error with a line of its own quoting the spec,
+    # which names the VUID again.
     vuids = [line for line in reported.splitlines()
-             if "VUID-" in line or "Validation Error:" in line]
+             if ("VUID-" in line or "Validation Error:" in line)
+             and not line.lstrip().startswith("The Vulkan spec states")]
     if log:
         vuids += [line for line in err.splitlines() if "D3D12 ERROR" in line]
     if vuids:
