@@ -52,10 +52,7 @@ fn main() {
             float v = (i == 2 || i == 4 || i == 5) ? r.w : r.y;
             gl_Position = vec4(u / z.y * 2.0 - 1.0, 1.0 - v / z.z * 2.0, z.x, 1.0);
         }
-        """), embed_shader("frag", """
-        layout(location = 0) out vec4 c;
-        void main() { c = vec4(1.0); }
-        """), gfx::PipelineDesc { depth_test: true, depth_write: true,
+        """), embed_shader("frag", "void main() {}"), gfx::PipelineDesc { depth_test: true, depth_write: true,
                                  depth_compare: gfx::COMPARE_LESS });
     let usage = gfx::DEPTH_TARGET | gfx::SAMPLED;
 

@@ -51,14 +51,21 @@ fn main() {
             gl_Position = vec4(u / z.y * 2.0 - 1.0, 1.0 - v / z.z * 2.0, z.x, 1.0);
         }
         """);
+    // Depth targets alone take a shader with no color output; the screen,
+    // which has color, one with.
+    let depth_only = embed_shader("frag", "void main() {}");
     let fs = embed_shader("frag", """
         layout(location = 0) out vec4 c;
         void main() { c = vec4(1.0); }
         """);
-    let less = gfx::pipeline(vs, fs, gfx::PipelineDesc { depth_test: true, depth_write: true,
-                                                         depth_compare: gfx::COMPARE_LESS });
-    let greater = gfx::pipeline(vs, fs, gfx::PipelineDesc { depth_test: true, depth_write: true,
-                                                            depth_compare: gfx::COMPARE_GREATER });
+    let less = gfx::pipeline(vs, depth_only, gfx::PipelineDesc { depth_test: true,
+                                                                 depth_write: true,
+                                                                 depth_compare: gfx::COMPARE_LESS });
+    let greater = gfx::pipeline(vs, depth_only, gfx::PipelineDesc { depth_test: true,
+                                                                    depth_write: true,
+                                                                    depth_compare: gfx::COMPARE_GREATER });
+    let on_screen = gfx::pipeline(vs, fs, gfx::PipelineDesc { depth_test: true, depth_write: true,
+                                                              depth_compare: gfx::COMPARE_LESS });
 
     // D32F, cleared to 1: three rectangles nearer, the last row left alone.
     let d32 = gfx::texture2d(4, 4, gfx::DEPTH32F, gfx::DEPTH_TARGET);
@@ -94,7 +101,7 @@ fn main() {
 
     // The screen's depth, after drawing its left half at 0.5.
     gfx::begin_screen(float4 { 0.0, 0.0, 0.0, 1.0 });
-    gfx::bind(less);
+    gfx::bind(on_screen);
     rect(0.0, 0.0, 4.0, 8.0, 0.5, 8.0, 8.0);
     gfx::end_pass();
     print("screen depth at 3,5 and 4,5: ",

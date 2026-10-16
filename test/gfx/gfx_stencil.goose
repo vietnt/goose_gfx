@@ -35,6 +35,8 @@ fn main() {
         layout(set = 3, binding = 0) uniform Draw { float z; float flip; float v; };
         void main() { c = vec4(v / 255.0, 0.0, 0.0, 1.0); }
         """);
+    // The steps draw into the depth target alone: no color output.
+    let depth_only = embed_shader("frag", "void main() {}");
     let color = gfx::render_target(4, 1, gfx::RGBA8);
     let ds = gfx::texture2d(4, 1, gfx::DEPTH_STENCIL, gfx::DEPTH_TARGET);
     let always = gfx::COMPARE_ALWAYS;
@@ -75,7 +77,7 @@ fn main() {
     // Each step in a pass of its own, loading the stencil and depth.
     var first = true;
     for s in steps {
-        let p = gfx::pipeline(vs, fs, s.desc);
+        let p = gfx::pipeline(vs, depth_only, s.desc);
         gfx::begin_pass(gfx::PassDesc { depth: ds, clear_color: false, clear_depth: first,
                                         depth_value: 0.25, clear_stencil: first,
                                         stencil_value: 3 });
@@ -84,7 +86,6 @@ fn main() {
         gfx::stencil_ref(s.ref);
         let u = Draw { z: 0.5, flip: if s.flip { 1.0 } else { 0.0 }, v: 0.0 };
         gfx::uniforms(gfx::VERTEX, 0, u);
-        gfx::uniforms(gfx::FRAGMENT, 0, u);
         gfx::draw(3);
         gfx::end_pass();
         gfx::release(p);
