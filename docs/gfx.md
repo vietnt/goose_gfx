@@ -35,6 +35,23 @@ generated C:
 * JIT and AOT execute the same compiled layer: a JIT run gets the copy linked
   into `goose`, an AOT program links the same archive.
 
+## Pinning this fork
+
+`vietnt/goose_gfx` is a fork; a program reaches it by declaring the package
+in its root file at a commit, which wins over the blessed `gfx` the compiler
+knows:
+
+```goose
+import gfx from "github.com/vietnt/goose_gfx@<full 40-character commit hash>";
+```
+
+Rome_goose does this in its `src/main.goose`. The hash must be the full one:
+Goose fetches the pinned ref shallowly, and a shallow fetch cannot resolve an
+abbreviated hash. A commit, once fetched, is never fetched again; moving the
+pin means editing that line. The shader built-ins added by the compiler fork
+(`vietnt/goose`) come with the compiler, not this package, so a program that
+uses them also needs a `goose` built from that fork.
+
 ## How it is built
 
 * **A package** (Goose's `docs/design/packages.md`): this repository holds the
