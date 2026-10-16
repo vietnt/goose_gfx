@@ -308,7 +308,9 @@ mouse confinement and Alt-Tab still need an interactive check on each platform.
   every way the machine can and compares the screenshots across them.
   `gfx_present.goose` prints the present mode each open() flag gives a
   window (`goose run test/window/gfx_present.goose`; on Linux with no
-  display, under `xvfb-run` with `SDL_VIDEODRIVER=x11`).
+  display, under `xvfb-run` with `SDL_VIDEODRIVER=x11`). Lavapipe under
+  Xvfb gives 0, 2, 1 for no flag, NO_VSYNC and IMMEDIATE. Metal has no
+  mailbox, so NO_VSYNC gives immediate there: 0, 1, 1.
 
 ### Platforms tested
 
