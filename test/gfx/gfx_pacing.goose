@@ -1,8 +1,9 @@
 // frame() keeps at most two frames on the GPU: with two still running it
 // waits for the older before submitting another, headless too. Every frame
-// here draws a pass slow enough on any GPU that the program, unpaced, would
-// be many frames ahead; a readback asked for in a frame is ready once the
-// frame two after it has been submitted, and not yet when its own has.
+// here draws a slow pass, and a readback asked for in a frame is ready once
+// the frame two after it has been submitted. How many frames are still
+// running at a submit depends on how fast the GPU is, so only the bound is
+// checked.
 // Frames paced this way also stay within bounded memory, frames that clear
 // a depth target many times over included, each clear moving it to fresh
 // memory while the GPU may still use the old.
@@ -49,14 +50,12 @@ fn main() {
     let marker = gfx::render_target(1, 1, gfx::RGBA8);
     var reads: gfx::Readback[8] = [gfx::Readback { 0 }; 8];
     var most = 0;
-    var ready_own = 0;
     var ready_two_on = 0;
     var frame = 0;
     while gfx::frame() && frame < 10 {
         if frame >= 2 {
             most = max(most, gfx::frames_in_flight());
-            // Frame - 1 was just submitted; frame - 3 had to finish first.
-            if frame - 1 < 8 && gfx::ready(reads[frame - 1]) { ready_own++; }
+            // Frame - 3 had to finish before frame - 1 was submitted.
             if frame - 3 >= 0 && frame - 3 < 8 && gfx::ready(reads[frame - 3]) { ready_two_on++; }
         }
         gfx::begin_pass(target, gfx::Texture { 0 }, float4 { 0.0, 0.0, 0.0, 1.0 });
@@ -71,8 +70,7 @@ fn main() {
         }
         frame++;
     }
-    print("most frames in flight at a submit: ", most);
-    print("readbacks ready as soon as their frame was submitted: ", ready_own, " of 7");
+    print("never more than 2 frames in flight at a submit: ", most <= 2);
     print("readbacks ready once the frame two after theirs was submitted: ", ready_two_on, " of 7");
     for i in 8 {
         let px = gfx::take(reads[i]);

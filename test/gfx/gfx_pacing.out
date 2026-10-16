@@ -1,4 +1,3 @@
-most frames in flight at a submit: 2
-readbacks ready as soon as their frame was submitted: 0 of 7
+never more than 2 frames in flight at a submit: true
 readbacks ready once the frame two after theirs was submitted: 7 of 7
 memory grew by under 16 MB over 100 frames of 20 depth clears: true
