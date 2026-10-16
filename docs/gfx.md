@@ -71,31 +71,26 @@ uses them also needs a `goose` built from that fork.
   without it builds the package into `GOOSE_HOME` the first time a program
   uses it, through the wrapper project of `src/native.h`, and loads the
   shared library that build makes for JIT runs.
-* **SDL3** comes from the submodule `third_party/SDL` (shallow, at
-  `release-3.4.16`). The package's CMakeLists builds it static, without its
-  2D renderer, OpenGL or the camera, none of which SDL_GPU needs.
-  `SDL_DEPS_SHARED` stays on, so on Linux SDL links only the C library and
-  loads X11, Wayland, audio and udev at run time. Two SDL fixes are carried;
-  the CMakeLists compiles each fixed backend from a copy in the build tree,
-  and fails to configure, saying to look at the fix again, once SDL's code
-  there changes.
-  * SDL 3.4.16's Direct3D 12 backend registers its debug-layer callback with
-    a NULL cookie, which `ID3D12InfoQueue1::RegisterMessageCallback`
-    rejects, so the debug layer's errors never reached SDL's log (or
-    `--validate`). SDL fixed it in 67bf94eed5, in release-3.4.18 as
-    39c59cd2e1.
+* **SDL3** comes from the submodule `third_party/SDL` (shallow), on the
+  `rome-3.4` branch of [vietnt/SDL](https://github.com/vietnt/SDL): upstream
+  `release-3.4.18` plus the commits Rome needs (see that branch's
+  `docs/README-rome-fork.md`, which also says why the branch is never
+  rewritten). Two of them fix SDL bugs this package used to work around:
   * SDL's Vulkan backend compacts fragmented memory during a submit, moving
-    resources to new memory with a copy of their contents. It checked only
-    for pending transfers, so a submit while another command buffer was being
-    recorded could move what that one writes: its writes then went to the
-    old memory, and everything after sampled and read back the copy taken
-    before them. A program hits this headless (on a window, only frames that
-    present compact) when releases have left a block fragmented, a pass has
-    written a texture in it, and the same frame then creates a resource that
-    needs a new block, since a new resource's contents and a new texture's
-    first barrier are submitted at once (`test/gfx/gfx_compute_after_release`).
-    The fix compacts only when no other command buffer is being recorded.
-    SDL's main branch still has the bug as of 2026-10.
+    resources to new memory with a copy of their contents. It skipped
+    resources used by pending copies but not ones another command buffer
+    still being recorded had written otherwise, so their writes went to the
+    old memory and everything after sampled and read back the copy taken
+    before them (`test/gfx/gfx_compute_after_release`). It now compacts only
+    when no other command buffer is being recorded.
+  * A fence released after a query alone left its command buffer never
+    cleaned up on Vulkan and Direct3D 12 (`docs/sdl-fence-release-leak.md`).
+    Both now give `SubmitAndAcquireFence`'s caller a reference of its own, as
+    Metal already did.
+  The package's CMakeLists builds SDL static, without its 2D renderer,
+  OpenGL or the camera, none of which SDL_GPU needs. `SDL_DEPS_SHARED` stays
+  on, so on Linux SDL links only the C library and loads X11, Wayland, audio
+  and udev at run time.
 * **The static C runtime on Windows** (`CMAKE_MSVC_RUNTIME_LIBRARY
   MultiThreaded`, in every configuration): the compiler, TinyCC, SDL and the
   layer share the runtime a plain `cl game.c` links, so a program can link the
@@ -183,13 +178,9 @@ fields in the same order, and the same constant values.
 * **At most two frames are on the GPU.** `frame()` submits each frame with
   a fence and, with two earlier ones still running, waits for the older
   before submitting, headless as well as windowed; `frames_in_flight()`
-  says how many were running at the last submit. A fence is waited on
-  before it is released, instant once it is done: SDL cleans up after a
-  command buffer (its uniform buffers, the textures it used, which cycling
-  reuses) only when it sees the buffer's fence signaled, and a fence
-  released after a query alone is reset by the next submit first, so that
-  buffer would never be cleaned up (`docs/sdl-fence-release-leak.md`, with
-  a repro using SDL alone).
+  says how many were running at the last submit. A done fence is released
+  after a query alone; `gfx_pacing` checks that this keeps memory flat
+  (`docs/sdl-fence-release-leak.md` for the SDL bug that once made it leak).
   Overlapping frames hold more memory, flat rather than growing: a target
   cleared every frame is cycled, so SDL keeps a copy for each frame the GPU
   may still be using, up to three. For the screen's colour and depth at
@@ -397,9 +388,6 @@ until CI or a Mac runs them.
   value at creation (`SDL_PROP_GPU_TEXTURE_CREATE_D3D12_CLEAR_R_FLOAT` to
   `_A_FLOAT`, `_DEPTH_FLOAT`, `_STENCIL_NUMBER`), the likely route: a
   target's clear color given when it is made.
-* **SDL**: review release-3.4.18 and move the submodule to it, dropping the
-  carried Direct3D 12 fix above and keeping the Vulkan one; it also brings SDL's polling fallback for
-  the debug layer's messages where `ID3D12InfoQueue1` is missing.
 * **Optional, last: handles checked across `close()`.** A handle from before
   a `close()` and reopen can name a resource of the new device; the game
   never closes and reopens, so this is a documented limit for now.

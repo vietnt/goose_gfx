@@ -1,5 +1,12 @@
 # SDL_GPU leaks a command buffer whose fence is released after a query
 
+Fixed in [vietnt/SDL](https://github.com/vietnt/SDL) `rome-3.4`, which this
+package's SDL submodule now follows, for Vulkan and Direct3D 12; upstream
+release-3.4.18 had already fixed Metal the same way. The application now
+holds a reference of its own to the fence, so the command buffer keeps its
+fence until it is cleaned up. `test/testgpu_fence_release.c` there is the
+regression test. The rest of this note describes SDL 3.4.16.
+
 Found while pacing frames (`frame()` keeps at most two on the GPU). Seen
 with the SDL in `third_party/SDL` (`fa2c02b`) on Vulkan, Mesa Lavapipe. The
 code involved is unchanged on SDL `main` as of `6defbc012` (2026-10-14).
@@ -57,8 +64,6 @@ wait: resident memory grew 0 MB over frames 20 to 120
 
 ## What goose_gfx does
 
-`gfx_fence_drop` waits on a fence before releasing it (`src/gfx/gfx_device.c`).
-`gfx_pacing` checks that 100 frames of 20 depth clears stay within 16 MB.
-A fix in SDL would let the wait go: for example, `VULKAN_ReleaseFence`
-could leave the fence to the command buffer when it has not been cleaned
-up yet, or the cleanup pass could run before a submit takes a fence.
+`gfx_fence_drop` used to wait on a fence before releasing it. With the
+fixed SDL it releases a done fence after a query alone, and `gfx_pacing`
+checks that 100 frames of 20 depth clears stay within 16 MB.

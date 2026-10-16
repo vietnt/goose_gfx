@@ -297,17 +297,8 @@ bool gfx_fence_wait(gfx_fence *f) {
     return f->signaled || gfx_sdl_fail("waiting for the GPU");
 }
 
-/* SDL cleans up after a command buffer (takes back its uniform buffers,
-   lets the textures it used be cycled into again) only when it sees the
-   buffer's fence signaled, in a later submit or a fence wait. A fence
-   released before then goes back to SDL's pool, the next submit resets it,
-   and the buffer is never cleaned up: frames paced by querying fences would
-   leak one each. So the last owner waits on the fence before releasing it,
-   which is instant once it is done, as every fence let go before close()
-   is. */
 void gfx_fence_drop(gfx_fence *f) {
     if (!f || --f->refs > 0) return;
-    SDL_WaitForGPUFences(gfx.dev, true, &f->fence, 1);
     SDL_ReleaseGPUFence(gfx.dev, f->fence);
     free(f);
 }
