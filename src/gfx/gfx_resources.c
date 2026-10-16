@@ -36,6 +36,13 @@ bool gfx_texture_format(int32_t format, SDL_GPUTextureFormat *out) {
         case GS_GFX_BC4: *out = SDL_GPU_TEXTUREFORMAT_BC4_R_UNORM; return true;
         case GS_GFX_BC5: *out = SDL_GPU_TEXTUREFORMAT_BC5_RG_UNORM; return true;
         case GS_GFX_BC7: *out = SDL_GPU_TEXTUREFORMAT_BC7_RGBA_UNORM; return true;
+        case GS_GFX_BC2: *out = SDL_GPU_TEXTUREFORMAT_BC2_RGBA_UNORM; return true;
+        case GS_GFX_BC1_SRGB: *out = SDL_GPU_TEXTUREFORMAT_BC1_RGBA_UNORM_SRGB; return true;
+        case GS_GFX_BC2_SRGB: *out = SDL_GPU_TEXTUREFORMAT_BC2_RGBA_UNORM_SRGB; return true;
+        case GS_GFX_BC3_SRGB: *out = SDL_GPU_TEXTUREFORMAT_BC3_RGBA_UNORM_SRGB; return true;
+        case GS_GFX_BC7_SRGB: *out = SDL_GPU_TEXTUREFORMAT_BC7_RGBA_UNORM_SRGB; return true;
+        case GS_GFX_BC6H_UFLOAT: *out = SDL_GPU_TEXTUREFORMAT_BC6H_RGB_UFLOAT; return true;
+        case GS_GFX_BC6H_FLOAT: *out = SDL_GPU_TEXTUREFORMAT_BC6H_RGB_FLOAT; return true;
         case GS_GFX_DEPTH:
             /* 32-bit float where it can be sampled too, as for a shadow map. */
             *out = gfx.dev && SDL_GPUTextureSupportsFormat(
@@ -65,6 +72,13 @@ static uint32_t gfx_block(SDL_GPUTextureFormat f) {
         case SDL_GPU_TEXTUREFORMAT_BC4_R_UNORM:
         case SDL_GPU_TEXTUREFORMAT_BC5_RG_UNORM:
         case SDL_GPU_TEXTUREFORMAT_BC7_RGBA_UNORM:
+        case SDL_GPU_TEXTUREFORMAT_BC2_RGBA_UNORM:
+        case SDL_GPU_TEXTUREFORMAT_BC1_RGBA_UNORM_SRGB:
+        case SDL_GPU_TEXTUREFORMAT_BC2_RGBA_UNORM_SRGB:
+        case SDL_GPU_TEXTUREFORMAT_BC3_RGBA_UNORM_SRGB:
+        case SDL_GPU_TEXTUREFORMAT_BC7_RGBA_UNORM_SRGB:
+        case SDL_GPU_TEXTUREFORMAT_BC6H_RGB_UFLOAT:
+        case SDL_GPU_TEXTUREFORMAT_BC6H_RGB_FLOAT:
             return 4;
         default:
             return 1;

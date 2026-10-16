@@ -278,13 +278,22 @@ GS_GFX_API(GS_GFX_PROTO)
     X(i32, DEPTH24_STENCIL8, 19) \
     X(i32, DEPTH, 20) \
     /* Block-compressed formats, 4 x 4 texels a block: BC1 (RGB with 1-bit \
-       alpha, 8 bytes a block), BC3 (RGBA, 16), BC4 (R, 8), BC5 (RG, 16) and \
-       BC7 (RGBA, 16). Sampled only: uploaded and read back as blocks. */ \
+       alpha, 8 bytes a block), BC2 (RGB with 4-bit alpha, 16), BC3 (RGBA, \
+       16), BC4 (R, 8), BC5 (RG, 16), BC7 (RGBA, 16), the sRGB forms of BC1, \
+       BC2, BC3 and BC7, and BC6H (RGB half floats, 16), unsigned and \
+       signed. Sampled only: uploaded and read back as blocks. */ \
     X(i32, BC1, 21) \
     X(i32, BC3, 22) \
     X(i32, BC4, 23) \
     X(i32, BC5, 24) \
     X(i32, BC7, 25) \
+    X(i32, BC2, 29) \
+    X(i32, BC1_SRGB, 30) \
+    X(i32, BC2_SRGB, 31) \
+    X(i32, BC3_SRGB, 32) \
+    X(i32, BC7_SRGB, 33) \
+    X(i32, BC6H_UFLOAT, 34) \
+    X(i32, BC6H_FLOAT, 35) \
     /* Samplers: SDL_GPUFilter, SDL_GPUSamplerAddressMode, SDL_GPUCompareOp. */ \
     X(i32, NEAREST, 0) \
     X(i32, LINEAR, 1) \

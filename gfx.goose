@@ -116,14 +116,23 @@ let DEPTH24_STENCIL8: i32 = 19;
 let DEPTH: i32 = 20;
 // Block-compressed, 4 x 4 texels a block, SAMPLED only: uploaded and read
 // back as blocks, in regions of whole blocks but where a mip's edge cuts
-// them short. BC1 is RGB with 1-bit alpha (8 bytes a block), BC3 RGBA (16),
-// BC4 one channel (8), BC5 two (16), BC7 RGBA (16). texture() returns a
+// them short. BC1 is RGB with 1-bit alpha (8 bytes a block), BC2 RGB with
+// 4-bit alpha (16), BC3 RGBA (16), BC4 one channel (8), BC5 two (16), BC7
+// RGBA (16), each _SRGB form decoding its color (not its alpha) from sRGB,
+// and BC6H RGB half floats (16), unsigned or signed. texture() returns a
 // zero handle, with error() set, where the device has no BC formats.
 let BC1: i32 = 21;
+let BC2: i32 = 29;
 let BC3: i32 = 22;
 let BC4: i32 = 23;
 let BC5: i32 = 24;
 let BC7: i32 = 25;
+let BC1_SRGB: i32 = 30;
+let BC2_SRGB: i32 = 31;
+let BC3_SRGB: i32 = 32;
+let BC7_SRGB: i32 = 33;
+let BC6H_UFLOAT: i32 = 34;
+let BC6H_FLOAT: i32 = 35;
 
 // Samplers.
 let NEAREST: i32 = 0;

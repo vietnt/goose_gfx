@@ -4,9 +4,13 @@
 // exactly is checked: BC1 and BC3 colors at their two endpoints and BC1's
 // transparent black (decoders round the thirds between endpoints
 // differently), BC3 alpha, BC4 and BC5 at their endpoints and the 0 and 255
-// of their six-value mode, and BC7 mode 6, whose interpolation the format
-// defines in integers. Direct3D 12 refuses the raw reads, with
-// gfx_compressed.direct3d12.out.
+// of their six-value mode, BC7 mode 6, whose interpolation the format
+// defines in integers, BC2's 4-bit alpha, and BC6H mode 11 at its two
+// endpoints, which the format defines bit for bit. The sRGB forms decode the
+// same blocks' colors, not their alpha, from sRGB: two endpoints that are
+// not 0 or 255 in each channel make a form that skips the decoding show.
+// The same BC6H block reads as other values signed and unsigned. Direct3D
+// 12 refuses the raw reads, with gfx_compressed.direct3d12.out.
 import gfx from "../..";
 import std;
 import os;
@@ -24,6 +28,16 @@ let bc7_mip0: u8[96] = [64, 114, 129, 66, 150, 253, 255, 120, 81, 250, 148, 62, 
 let bc7_mip1: u8[32] = [64, 71, 65, 99, 146, 253, 255, 126, 189, 80, 250, 148, 62, 216, 114, 28, 192, 74, 97, 19, 147, 253, 255, 255, 206, 97, 11, 165, 79, 233, 131, 45];
 let bc7_edge: u8[16] = [64, 78, 129, 195, 147, 253, 255, 120, 209, 114, 28, 182, 80, 250, 148, 62];
 let bc7_layer1: u8[16] = [192, 63, 0, 240, 7, 2, 255, 255, 241, 135, 240, 135, 240, 135, 240, 135];
+// Color endpoints 90,174,49 and 49,109,90, which every decoder widens from
+// 5:6:5 alike, and which decode from sRGB to values far from a rounding
+// boundary; BC2 adds alpha nibbles 0 to 15 by texel, BC3 alpha 200 and 60.
+let bc1_color: u8[8] = [102, 93, 107, 51, 68, 17, 80, 5];
+let bc2: u8[16] = [16, 50, 84, 118, 152, 186, 220, 254, 102, 93, 107, 51, 68, 17, 80, 5];
+let bc3_color: u8[16] = [200, 60, 8, 18, 4, 64, 146, 0, 102, 93, 107, 51, 68, 17, 80, 5];
+// Mode 6: endpoints 198,90,152,128 and 105,225,13,255, indices 0 and 15.
+let bc7_color: u8[16] = [192, 49, 173, 5, 103, 26, 128, 127, 241, 240, 15, 15, 0, 255, 255, 0];
+// Mode 11: endpoints 256,100,400 and 500,7,300 of 10 bits, indices 0 and 15.
+let bc6h: u8[16] = [3, 32, 50, 32, 163, 239, 0, 150, 240, 240, 15, 15, 0, 255, 255, 0];
 
 fn texels(px: u8[:], w: i64, channels: i64) -> u8[>..] {
     var out: u8[>..] = [];
@@ -95,6 +109,25 @@ fn main() {
         gfx::release(target);
         return px;
     }
+    // A 4 x 4 texture's texels as floats, row after row.
+    fn fetch_floats(p: gfx::Pipeline, t: gfx::Texture, s: gfx::Sampler) -> u8[>..] {
+        let target = gfx::render_target(4, 4, gfx::RGBA32F);
+        gfx::begin_pass(target, gfx::Texture { 0 }, float4 { 0.5, 0.5, 0.5, 0.5 });
+        gfx::bind(p);
+        gfx::bind_texture(gfx::FRAGMENT, 0, t, s);
+        gfx::uniforms(gfx::FRAGMENT, 0, Lod { lod: 0, layer: 0 });
+        gfx::draw(3);
+        gfx::end_pass();
+        var fs: f32[>..] = [];
+        gfx::read_texture(target, fs);
+        gfx::release(target);
+        var out: u8[>..] = [];
+        for i in 16 {
+            out.append(if i % 4 == 0 { "\n  " } else { " " });
+            for c in 4 { format(out, if c > 0 { "," } else { "" }, fs[i * 4 + c]); }
+        }
+        return out;
+    }
 
     // BC1, 8 x 8 with its whole chain: mips 2 and 1 are less than a block.
     let bc1_tex = gfx::texture(gfx::TextureDesc { format: gfx::BC1, width: 8, height: 8, mips: 4 });
@@ -137,6 +170,25 @@ fn main() {
     gfx::update_texture(layers, gfx::Region { layer: 1 }, bc7_layer1);
     print("bc7 array layer 1:", texels(fetch(fetch_array, layers, nearest, 0, 1, 4, 4), 4, 4));
 
+    let bc2_tex = gfx::texture(gfx::TextureDesc { format: gfx::BC2, width: 4, height: 4 });
+    gfx::update_texture(bc2_tex, bc2);
+    print("bc2:", texels(fetch(fetch2d, bc2_tex, nearest, 0, 0, 4, 4), 4, 4));
+    let forms: i32[4] = [gfx::BC1_SRGB, gfx::BC2_SRGB, gfx::BC3_SRGB, gfx::BC7_SRGB];
+    for i in 4 {
+        let t = gfx::texture(gfx::TextureDesc { format: forms[i], width: 4, height: 4 });
+        let name = if i == 0 { "bc1" } else if i == 1 { "bc2" } else if i == 2 { "bc3" } else { "bc7" };
+        gfx::update_texture(t, if i == 0 { bc1_color[..] } else if i == 1 { bc2[..] }
+                               else if i == 2 { bc3_color[..] } else { bc7_color[..] });
+        print(name, " srgb:", texels(fetch(fetch2d, t, nearest, 0, 0, 4, 4), 4, 4));
+        gfx::release(t);
+    }
+    let bc6h_u = gfx::texture(gfx::TextureDesc { format: gfx::BC6H_UFLOAT, width: 4, height: 4 });
+    gfx::update_texture(bc6h_u, bc6h);
+    print("bc6h unsigned:", fetch_floats(fetch2d, bc6h_u, nearest));
+    let bc6h_s = gfx::texture(gfx::TextureDesc { format: gfx::BC6H_FLOAT, width: 4, height: 4 });
+    gfx::update_texture(bc6h_s, bc6h);
+    print("bc6h signed:", fetch_floats(fetch2d, bc6h_s, nearest));
+
     // The blocks themselves, read back: region_size counts whole blocks.
     print("raw: bc1 mip 2 is ", gfx::region_size(bc1_tex, gfx::Region { mip: 2 }), " bytes, ",
           "bc7 mip 0 ", gfx::region_size(bc7_tex, gfx::Region {}), ", its edge block ",
@@ -145,5 +197,7 @@ fn main() {
     raw_read("bc7 mip 0", bc7_tex, gfx::Region {}, bc7_mip0);
     raw_read("bc7 edge block", bc7_tex, gfx::Region { mip: 1, x: 4, w: 2, h: 4 }, bc7_edge);
     raw_read("bc7 layer 1", layers, gfx::Region { layer: 1 }, bc7_layer1);
+    raw_read("bc2", bc2_tex, gfx::Region {}, bc2);
+    raw_read("bc6h", bc6h_s, gfx::Region {}, bc6h);
     gfx::close();
 }
