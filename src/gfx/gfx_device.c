@@ -155,8 +155,86 @@ SDL_GPUCommandBuffer *gfx_cmd(void) {
         gfx.cmd = SDL_AcquireGPUCommandBuffer(gfx.dev);
         if (!gfx.cmd) gfx_sdl_fail("acquiring a command buffer");
         memset(gfx.uniforms_pushed, 0, sizeof gfx.uniforms_pushed);
+        for (int i = 0; gfx.cmd && i < gfx.ngroups; i++)
+            SDL_PushGPUDebugGroup(gfx.cmd, gfx.groups[i]);
     }
     return gfx.cmd;
+}
+
+/* The command buffer being recorded, to submit, with its debug groups
+   closed. */
+static SDL_GPUCommandBuffer *gfx_take_cmd(void) {
+    SDL_GPUCommandBuffer *cb = gfx.cmd;
+    for (int i = 0; cb && i < gfx.ngroups; i++) SDL_PopGPUDebugGroup(cb);
+    gfx.cmd = NULL;
+    return cb;
+}
+
+/* --- debug groups, labels and names ------------------------------------------ */
+
+static const char *gfx_cstr(gs_gfx_bytes s, char *buf, size_t cap);
+
+void gs_gfx_push_group(gs_gfx_bytes name) {
+    if (!gfx_need_device("push_group")) return;
+    if (gfx.ngroups == GFX_MAX_GROUPS) {
+        gfx_misuse("push_group: %d debug groups open already", GFX_MAX_GROUPS);
+        return;
+    }
+    char buf[256];
+    char *copy = SDL_strdup(gfx_cstr(name, buf, sizeof buf));
+    SDL_GPUCommandBuffer *cb = gfx_cmd();
+    if (!cb || !copy) {
+        SDL_free(copy);
+        return;
+    }
+    SDL_PushGPUDebugGroup(cb, copy);
+    gfx.groups[gfx.ngroups++] = copy;
+}
+
+void gs_gfx_pop_group(void) {
+    if (!gfx_need_device("pop_group")) return;
+    if (gfx.ngroups == 0) {
+        gfx_misuse("pop_group with no debug group open");
+        return;
+    }
+    if ((gfx.pass || gfx.cpass) && gfx.ngroups <= gfx.pass_groups) {
+        gfx_misuse("pop_group in a pass, of a group pushed before it: pop it after the pass");
+        return;
+    }
+    SDL_GPUCommandBuffer *cb = gfx_cmd();
+    if (cb) SDL_PopGPUDebugGroup(cb);
+    SDL_free(gfx.groups[--gfx.ngroups]);
+}
+
+void gfx_end_pass_groups(const char *what) {
+    if (gfx.ngroups <= gfx.pass_groups) return;
+    gfx_misuse("%s with %d debug group(s) pushed in the pass still open", what,
+               gfx.ngroups - gfx.pass_groups);
+    while (gfx.ngroups > gfx.pass_groups) {
+        if (gfx.cmd) SDL_PopGPUDebugGroup(gfx.cmd);
+        SDL_free(gfx.groups[--gfx.ngroups]);
+    }
+}
+
+void gs_gfx_label(gs_gfx_bytes text) {
+    if (!gfx_need_device("label")) return;
+    char buf[256];
+    SDL_GPUCommandBuffer *cb = gfx_cmd();
+    if (cb) SDL_InsertGPUDebugLabel(cb, gfx_cstr(text, buf, sizeof buf));
+}
+
+void gs_gfx_set_texture_name(gs_gfx_texture t, gs_gfx_bytes name) {
+    gfx_texture_slot *s = gfx_texture_slot_of(t);
+    if (!s) return;
+    char buf[256];
+    SDL_SetGPUTextureName(gfx.dev, s->tex, gfx_cstr(name, buf, sizeof buf));
+}
+
+void gs_gfx_set_buffer_name(gs_gfx_buffer b, gs_gfx_bytes name) {
+    gfx_buffer_slot *s = gfx_buffer_slot_of(b);
+    if (!s) return;
+    char buf[256];
+    SDL_SetGPUBufferName(gfx.dev, s->buf, gfx_cstr(name, buf, sizeof buf));
 }
 
 bool gfx_submit(void) {
@@ -166,8 +244,7 @@ bool gfx_submit(void) {
         gfx_fence_drop(f);
         return f != NULL;
     }
-    SDL_GPUCommandBuffer *cb = gfx.cmd;
-    gfx.cmd = NULL;
+    SDL_GPUCommandBuffer *cb = gfx_take_cmd();
     return SDL_SubmitGPUCommandBuffer(cb) || gfx_sdl_fail("submitting commands");
 }
 
@@ -190,7 +267,7 @@ gfx_fence *gfx_submit_fenced(void) {
     SDL_GPUCommandBuffer *cb = gfx_cmd();
     gfx_fence *f = NULL;
     if (cb) {
-        gfx.cmd = NULL;
+        gfx_take_cmd();
         SDL_GPUFence *fence = SDL_SubmitGPUCommandBufferAndAcquireFence(cb);
         if (fence) {
             f = (gfx_fence *)calloc(1, sizeof *f);
@@ -605,6 +682,7 @@ void gs_gfx_close(void) {
        open. */
     char error[sizeof gfx.error];
     memcpy(error, gfx.error, sizeof error);
+    for (int i = 0; i < gfx.ngroups; i++) SDL_free(gfx.groups[i]);
     int64_t misuse = gfx.misuse;
     void *d3dcompiler = gfx.d3dcompiler, *d3dcompile = gfx.d3dcompile;
     memset(&gfx, 0, sizeof gfx);

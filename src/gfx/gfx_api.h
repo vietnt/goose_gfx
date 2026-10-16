@@ -178,6 +178,7 @@ typedef struct {
     X(uint8_t, gs_gfx_read_buffer, (gs_gfx_buffer b, int64_t offset, gs_gfx_bytes out)) \
     X(int64_t, gs_gfx_buffer_size, (gs_gfx_buffer b)) \
     X(void, gs_gfx_release_buffer, (gs_gfx_buffer b)) \
+    X(void, gs_gfx_set_buffer_name, (gs_gfx_buffer b, gs_gfx_bytes name)) \
     /* Textures and samplers. */ \
     X(gs_gfx_texture, gs_gfx_create_texture, (const gs_gfx_texture_desc *desc)) \
     X(gs_gfx_texture, gs_gfx_load_texture, (gs_gfx_bytes path, int64_t flags)) \
@@ -195,6 +196,7 @@ typedef struct {
     X(void, gs_gfx_generate_mips, (gs_gfx_texture t)) \
     X(uint8_t, gs_gfx_texture_info, (gs_gfx_texture t, gs_gfx_texture_desc *out)) \
     X(void, gs_gfx_release_texture, (gs_gfx_texture t)) \
+    X(void, gs_gfx_set_texture_name, (gs_gfx_texture t, gs_gfx_bytes name)) \
     X(gs_gfx_sampler, gs_gfx_create_sampler, (const gs_gfx_sampler_desc *desc)) \
     X(void, gs_gfx_release_sampler, (gs_gfx_sampler s)) \
     /* Pipelines. */ \
@@ -216,6 +218,9 @@ typedef struct {
     X(void, gs_gfx_scissor, (int64_t x, int64_t y, int64_t w, int64_t h)) \
     X(void, gs_gfx_blend_constant, (float r, float g, float b, float a)) \
     X(void, gs_gfx_stencil_ref, (int64_t ref)) \
+    X(void, gs_gfx_push_group, (gs_gfx_bytes name)) \
+    X(void, gs_gfx_pop_group, (void)) \
+    X(void, gs_gfx_label, (gs_gfx_bytes text)) \
     X(void, gs_gfx_draw, (int64_t vertices, int64_t instances, int64_t first_vertex, int64_t first_instance)) \
     X(void, gs_gfx_draw_indexed, (int64_t indices, int64_t instances, int64_t first_index, int64_t vertex_offset, int64_t first_instance)) \
     X(void, gs_gfx_draw_indirect, (gs_gfx_buffer b, int64_t offset, int64_t count)) \

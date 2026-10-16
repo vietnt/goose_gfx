@@ -109,6 +109,7 @@ typedef struct {
 } gfx_variant;
 
 #define GFX_MAX_VARIANTS 8
+#define GFX_MAX_GROUPS 16
 
 typedef struct {
     gfx_shader *vs, *fs;
@@ -161,6 +162,11 @@ typedef struct {
     int compute_rw_textures, compute_rw_buffers;
     /* Uniform slots pushed, by stage, in this command buffer. */
     uint32_t uniforms_pushed[GFX_STAGES];
+    /* Debug groups open, outermost first, and how many were open when the
+       pass being recorded began. A command buffer ends with them popped and
+       the next begins with them pushed again, so they balance in each. */
+    char *groups[GFX_MAX_GROUPS];
+    int ngroups, pass_groups;
 
     /* Input: held state plus every transition seen in this frame. A tap
        between frames sets both pressed and released, even though it ends released. */
@@ -234,6 +240,9 @@ bool gfx_need_device(const char *what);
 SDL_GPUCommandBuffer *gfx_cmd(void);
 /* Submits what has been recorded, if anything, without waiting. */
 bool gfx_submit(void);
+/* Misuse unless the debug groups pushed in the pass being ended are popped,
+   which it then pops. */
+void gfx_end_pass_groups(const char *what);
 /* Submits what has been recorded and waits until the GPU has done it all. */
 bool gfx_finish(void);
 /* Submits what has been recorded (an empty command buffer if nothing),

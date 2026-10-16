@@ -609,6 +609,8 @@ fn update_buffer(b: Buffer, data: const u8[:]) -> bool { update_buffer(b, 0, dat
 extern "gs_gfx_read_buffer" fn read_buffer_into(b: Buffer, offset: i64, out: u8[:]) -> bool;
 extern "gs_gfx_buffer_size" fn buffer_size(b: Buffer) -> i64;
 extern "gs_gfx_release_buffer" fn release(b: Buffer);
+// A name for graphics debuggers and validation messages to show.
+extern "gs_gfx_set_buffer_name" fn set_name(b: Buffer, name: const u8[:]);
 
 // Reads back `out.len` bytes from `offset`, once the GPU has done
 // everything submitted before. Not inside a pass.
@@ -841,6 +843,7 @@ fn texture_info(t: Texture) -> TextureDesc {
     d
 }
 extern "gs_gfx_release_texture" fn release(t: Texture);
+extern "gs_gfx_set_texture_name" fn set_name(t: Texture, name: const u8[:]);
 
 // The bytes one texel of an uncompressed `format` takes as it is read back:
 // 4 for every depth format, read as f32. region_size counts compressed ones.
@@ -919,6 +922,15 @@ fn uniforms<T>(stage: i64, slot: i64, u: T) {
 extern "gs_gfx_viewport" fn viewport(x: f32, y: f32, w: f32, h: f32);
 // w == 0: the whole target.
 extern "gs_gfx_scissor" fn scissor(x: i64, y: i64, w: i64, h: i64);
+// Debug groups and labels, for a graphics debugger (RenderDoc, PIX, Xcode)
+// to show the work recorded between push_group and pop_group under a name,
+// nested, and a label at one point. A group pushed in a pass is popped in
+// it; one pushed outside a pass may stay open across passes and frames. On
+// Direct3D 12 they need WinPixEventRuntime.dll beside the program, and do
+// nothing without it.
+extern "gs_gfx_push_group" fn push_group(name: const u8[:]);
+extern "gs_gfx_pop_group" fn pop_group();
+extern "gs_gfx_label" fn label(text: const u8[:]);
 // The value stencil tests compare with and STENCIL_REPLACE writes, 0 to
 // 255, for the rest of the pass; each pass starts at 0.
 extern "gs_gfx_stencil_ref" fn stencil_ref(ref: i64);

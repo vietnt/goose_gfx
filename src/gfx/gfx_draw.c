@@ -107,6 +107,7 @@ uint8_t gs_gfx_begin_pass(const gs_gfx_pass_desc *d) {
     if (!gfx.pass) return gfx_sdl_fail("beginning a render pass");
     gfx.targets = t;
     gfx.pipeline = NULL;
+    gfx.pass_groups = gfx.ngroups;
     gfx_reset_bindings();
     SDL_GPUViewport vp = { 0, 0, (float)w, (float)h, 0, 1 };
     SDL_SetGPUViewport(gfx.pass, &vp);
@@ -120,6 +121,7 @@ void gs_gfx_end_pass(void) {
         gfx_misuse("end_pass with no render pass begun");
         return;
     }
+    gfx_end_pass_groups("end_pass");
     SDL_EndGPURenderPass(gfx.pass);
     gfx.pass = NULL;
     gfx.pipeline = NULL;
@@ -474,6 +476,7 @@ uint8_t gs_gfx_begin_compute(gs_gfx_buffer_slice rw_buffers, gs_gfx_texture_slic
                                         (Uint32)rw_buffers.len);
     if (!gfx.cpass) return gfx_sdl_fail("beginning a compute pass");
     gfx.compute = NULL;
+    gfx.pass_groups = gfx.ngroups;
     gfx.compute_rw_buffers = (int)rw_buffers.len;
     gfx.compute_rw_textures = (int)rw_textures.len;
     gfx.samplers_bound[GS_GFX_COMPUTE] = gfx.textures_bound[GS_GFX_COMPUTE] = 0;
@@ -486,6 +489,7 @@ void gs_gfx_end_compute(void) {
         gfx_misuse("end_compute with no compute pass begun");
         return;
     }
+    gfx_end_pass_groups("end_compute");
     SDL_EndGPUComputePass(gfx.cpass);
     gfx.cpass = NULL;
     gfx.compute = NULL;
