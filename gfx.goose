@@ -935,6 +935,17 @@ extern "gs_gfx_draw_indexed" fn draw_indexed(indices: i64, instances: i64, first
                                              vertex_offset: i64, first_instance: i64);
 fn draw_indexed(indices: i64) { draw_indexed(indices, 1, 0, 0, 0) }
 fn draw_indexed_instanced(indices: i64, instances: i64) { draw_indexed(indices, instances, 0, 0, 0) }
+// Draws whose parameters a buffer created with BUFFER_INDIRECT holds:
+// `count` DrawCommands (IndexedDrawCommands) one after the other from
+// byte `offset`, a multiple of 4, which a compute shader may have written.
+// As SDL_GPU warns, gl_VertexIndex and gl_InstanceIndex do not count from
+// first_vertex and first_instance alike on every backend: a shader relying
+// on them takes 0 for those.
+struct DrawCommand { vertices: u32, instances: u32, first_vertex: u32, first_instance: u32 }
+struct IndexedDrawCommand { indices: u32, instances: u32, first_index: u32, vertex_offset: i32,
+                            first_instance: u32 }
+extern "gs_gfx_draw_indirect" fn draw_indirect(b: Buffer, offset: i64, count: i64);
+extern "gs_gfx_draw_indexed_indirect" fn draw_indexed_indirect(b: Buffer, offset: i64, count: i64);
 
 // --- compute -------------------------------------------------------------------
 
@@ -956,6 +967,10 @@ extern "gs_gfx_end_compute" fn end_compute();
 extern "gs_gfx_bind_compute_pipeline" fn bind(p: ComputePipeline);
 // Runs x * y * z workgroups of the shader's local size.
 extern "gs_gfx_dispatch" fn dispatch(x: i64, y: i64, z: i64);
+// The same, with the group counts a DispatchCommand at byte `offset` (a
+// multiple of 4) of a BUFFER_INDIRECT buffer holds.
+struct DispatchCommand { x: u32, y: u32, z: u32 }
+extern "gs_gfx_dispatch_indirect" fn dispatch_indirect(b: Buffer, offset: i64);
 
 // --- matrices ------------------------------------------------------------------
 

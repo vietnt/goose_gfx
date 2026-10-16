@@ -397,6 +397,44 @@ void gs_gfx_draw_indexed(int64_t indices, int64_t instances, int64_t first_index
                                  (Uint32)first_instance);
 }
 
+/* The buffer of an indirect call, holding `count` commands of `stride`
+   bytes from `offset`. */
+static SDL_GPUBuffer *gfx_indirect(gs_gfx_buffer b, int64_t offset, int64_t count,
+                                   uint32_t stride, const char *what) {
+    gfx_buffer_slot *s = gfx_buffer_slot_of(b);
+    if (!s) return NULL;
+    if (!(s->usage & SDL_GPU_BUFFERUSAGE_INDIRECT)) {
+        gfx_misuse("%s: the buffer was not created with BUFFER_INDIRECT", what);
+        return NULL;
+    }
+    if (offset < 0 || offset % 4 || count < 0 ||
+        (uint64_t)offset + (uint64_t)count * stride > s->size) {
+        gfx_misuse("%s: %lld command(s) of %u bytes at offset %lld, in a buffer of %u bytes "
+                   "(the offset a multiple of 4)", what, (long long)count, stride,
+                   (long long)offset, s->size);
+        return NULL;
+    }
+    return s->buf;
+}
+
+void gs_gfx_draw_indirect(gs_gfx_buffer b, int64_t offset, int64_t count) {
+    if (!gfx_ready_to_draw("draw_indirect")) return;
+    SDL_GPUBuffer *buf = gfx_indirect(b, offset, count, sizeof(SDL_GPUIndirectDrawCommand),
+                                      "draw_indirect");
+    if (buf) SDL_DrawGPUPrimitivesIndirect(gfx.pass, buf, (Uint32)offset, (Uint32)count);
+}
+
+void gs_gfx_draw_indexed_indirect(gs_gfx_buffer b, int64_t offset, int64_t count) {
+    if (!gfx_ready_to_draw("draw_indexed_indirect")) return;
+    if (!gfx.index_bound) {
+        gfx_misuse("draw_indexed_indirect with no index buffer bound");
+        return;
+    }
+    SDL_GPUBuffer *buf = gfx_indirect(b, offset, count, sizeof(SDL_GPUIndexedIndirectDrawCommand),
+                                      "draw_indexed_indirect");
+    if (buf) SDL_DrawGPUIndexedPrimitivesIndirect(gfx.pass, buf, (Uint32)offset, (Uint32)count);
+}
+
 /* --- compute ----------------------------------------------------------------- */
 
 uint8_t gs_gfx_begin_compute(gs_gfx_buffer_slice rw_buffers, gs_gfx_texture_slice rw_textures,
@@ -487,4 +525,19 @@ void gs_gfx_dispatch(int64_t x, int64_t y, int64_t z) {
     }
     if (!gfx_stage_ready(GS_GFX_COMPUTE, &gfx.compute->info, "dispatch")) return;
     SDL_DispatchGPUCompute(gfx.cpass, (Uint32)x, (Uint32)y, (Uint32)z);
+}
+
+void gs_gfx_dispatch_indirect(gs_gfx_buffer b, int64_t offset) {
+    if (!gfx.cpass) {
+        gfx_misuse("dispatch_indirect outside a compute pass");
+        return;
+    }
+    if (!gfx.compute) {
+        gfx_misuse("dispatch_indirect with no compute pipeline bound");
+        return;
+    }
+    if (!gfx_stage_ready(GS_GFX_COMPUTE, &gfx.compute->info, "dispatch_indirect")) return;
+    SDL_GPUBuffer *buf = gfx_indirect(b, offset, 1, sizeof(SDL_GPUIndirectDispatchCommand),
+                                      "dispatch_indirect");
+    if (buf) SDL_DispatchGPUComputeIndirect(gfx.cpass, buf, (Uint32)offset);
 }
