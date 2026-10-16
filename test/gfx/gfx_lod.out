@@ -8,3 +8,6 @@ texture() at 4:1, lod 1 to 1: mip 1
 textureGrad 4 texels at 1:1, array layer 2: mip 2
 textureGrad 4 texels at 1:1, layer 1, max_lod 1: mip 1
 texture() at 1:1, array layer 1: mip 0
+texture() at 1:1, lod_bias 1: mip 1
+texture() at 4:1, lod_bias -1: mip 1
+texture() at 1:1, lod_bias 2, max_lod 1: mip 1

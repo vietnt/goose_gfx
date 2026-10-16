@@ -263,6 +263,10 @@ struct SamplerDesc {
     // worked out: max_lod 0 keeps to the top mip whatever the texture has.
     min_lod: f32 = 0.0,
     max_lod: f32 = 1000.0,
+    // Added to the level of detail sampling works out, before min_lod and
+    // max_lod clamp it. SDL_GPU's Metal backend ignores it (Metal samplers
+    // have no bias): a shader biases there, texture(s, P, bias).
+    lod_bias: f32 = 0.0,
 }
 
 // A pipeline is not tied to the formats it draws into: it is made for the

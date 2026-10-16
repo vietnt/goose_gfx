@@ -1,6 +1,7 @@
 // Which mip level sampling reaches: by the implicit level of detail, by an
-// explicit one, by explicit gradients, and as a sampler's min_lod and
-// max_lod clamp them. Every mip of every layer is one flat color, so the
+// explicit one, by explicit gradients, and as a sampler's lod_bias moves the
+// implicit one and its min_lod and max_lod clamp them. SDL_GPU's Metal
+// backend has no sampler bias, with gfx_lod.metal.out. Every mip of every layer is one flat color, so the
 // level a pixel read is exact in what it reads back.
 import gfx from "../..";
 import std;
@@ -97,6 +98,13 @@ fn main() {
     var one = whole;
     one.min_lod = 1.0;
     one.max_lod = 1.0;
+    var up = whole;
+    up.lod_bias = 1.0;
+    var down = whole;
+    down.lod_bias = -1.0;
+    var past = whole;
+    past.lod_bias = 2.0;
+    past.max_lod = 1.0;
     let big = gfx::render_target(8, 8, gfx::RGBA8);
     let small = gfx::render_target(2, 2, gfx::RGBA8);
 
@@ -111,6 +119,9 @@ fn main() {
         Case { name: "textureGrad 4 texels at 1:1, array layer 2", p: grad, t: layered, s: whole, target: big, lod: 0.0, layer: 2 },
         Case { name: "textureGrad 4 texels at 1:1, layer 1, max_lod 1", p: grad, t: layered, s: one, target: big, lod: 0.0, layer: 1 },
         Case { name: "texture() at 1:1, array layer 1", p: implicit_array, t: layered, s: whole, target: big, lod: 0.0, layer: 1 },
+        Case { name: "texture() at 1:1, lod_bias 1", p: implicit, t: flat, s: up, target: big, lod: 0.0, layer: 0 },
+        Case { name: "texture() at 4:1, lod_bias -1", p: implicit, t: flat, s: down, target: small, lod: 0.0, layer: 0 },
+        Case { name: "texture() at 1:1, lod_bias 2, max_lod 1", p: implicit, t: flat, s: past, target: big, lod: 0.0, layer: 0 },
     ];
     for c in cases {
         gfx::begin_pass(c.target, gfx::Texture { 0 }, float4 { 0.0, 0.0, 0.0, 0.0 });

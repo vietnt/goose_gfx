@@ -819,6 +819,7 @@ gs_gfx_sampler gs_gfx_create_sampler(const gs_gfx_sampler_desc *desc) {
     ci.enable_compare = d->compare != 0;
     ci.min_lod = d->min_lod;
     ci.max_lod = d->max_lod;
+    ci.mip_lod_bias = d->lod_bias;
     SDL_GPUSampler *smp = SDL_CreateGPUSampler(gfx.dev, &ci);
     if (!smp) {
         gfx_sdl_fail("creating a sampler");

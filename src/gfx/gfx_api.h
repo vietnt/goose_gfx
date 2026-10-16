@@ -84,6 +84,7 @@ typedef struct {
     float max_anisotropy;       /* 1 or less: off */
     int32_t compare;            /* a COMPARE_*, for a shadow sampler; 0: none */
     float min_lod, max_lod;     /* the mip levels sampling may reach, clamped to the texture's */
+    float lod_bias;             /* added to the level of detail before the clamp; not on Metal */
 } gs_gfx_sampler_desc;
 
 typedef struct {
