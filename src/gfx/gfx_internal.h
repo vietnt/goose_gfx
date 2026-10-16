@@ -276,6 +276,11 @@ static inline bool gfx_has_stencil(SDL_GPUTextureFormat f) {
     return f == SDL_GPU_TEXTUREFORMAT_D24_UNORM_S8_UINT || f == SDL_GPU_TEXTUREFORMAT_D32_FLOAT_S8_UINT;
 }
 const char *gfx_stage_name(int64_t stage);
+/* Whether `s` is one mip of one layer, which a pass's clear rewrites whole. */
+static inline bool gfx_one_subresource(const gfx_texture_slot *s) {
+    return s->desc.mips == 1 && (s->desc.kind == GS_GFX_TEXTURE_2D ||
+                                 (s->desc.kind == GS_GFX_TEXTURE_2D_ARRAY && s->desc.depth == 1));
+}
 
 gfx_texture_slot *gfx_texture_slot_of(gs_gfx_texture t);
 gfx_buffer_slot *gfx_buffer_slot_of(gs_gfx_buffer b);
