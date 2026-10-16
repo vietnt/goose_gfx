@@ -173,8 +173,8 @@ fields in the same order, and the same constant values.
   `read_texture` on one draws the region into an R32F target, a full-screen
   triangle that `texelFetch`es it, and reads that: one f32 a texel for every
   depth format, D16 and D24 normalized, stencil left out. The region's
-  origin reaches the shader per instance from a vertex buffer, so the
-  program's pushed uniforms are untouched. Depth textures, the screen's
+  origin reaches the shader from a vertex buffer, so the program's pushed
+  uniforms are untouched. Depth textures, the screen's
   included, are created sampled where the device can sample their format;
   where it cannot, the read fails with the reason in `error()`. Mip 0 of a
   2D texture is what reads back; another mip, a layer, a cube or a

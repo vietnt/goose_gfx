@@ -580,8 +580,9 @@ var depth_reader = DepthReader { 0, Pipeline { 0 }, Sampler { 0 } };
 // An R32F texture holding `region` of depth texture `t`, drawn into it in
 // the command buffer being recorded; Texture { 0 } when `t` is not a depth
 // texture this can read, which read_texture_into then reports. The region's
-// origin comes per instance from a vertex buffer, not as uniforms, so the
-// uniforms the program pushed stay as they were.
+// origin comes from a vertex buffer, not as uniforms, so the uniforms the
+// program pushed stay as they were: vertex buffer 0, the same at each of the
+// triangle's vertices, since a draw needs buffer 0 bound on Vulkan.
 fn depth_copy(t: Texture, region: Region, bytes: i64) -> Texture {
     let info = texture_info(t);
     if !is_depth(info.format) || info.kind != TEXTURE_2D || info.samples != 1 ||
@@ -612,16 +613,16 @@ fn depth_copy(t: Texture, region: Region, bytes: i64) -> Texture {
             layout(location = 0) out float result;
             void main() { result = texelFetch(depth, v_origin + ivec2(gl_FragCoord.xy), 0).r; }
             """);
-        depth_reader.pipeline = pipeline(vs, fs, PipelineDesc { instance_location: 0 });
+        depth_reader.pipeline = pipeline(vs, fs);
         depth_reader.sampler = sampler(NEAREST, CLAMP);
         depth_reader.opened = open_count();
     }
-    let origin: int2[1] = [int2 { x, y }];
+    let origin: int2[3] = [int2 { x, y }; 3];
     let at = buffer(BUFFER_VERTEX, bytes_of(origin));
     let target = render_target(w, h, R32F);
     begin_pass(target, Texture { 0 }, float4 { 0.0, 0.0, 0.0, 0.0 });
     bind(depth_reader.pipeline);
-    bind_vertex_buffer(1, at, 0);
+    bind_vertex_buffer(at);
     bind_texture(FRAGMENT, 0, t, depth_reader.sampler);
     draw(3);
     end_pass();
