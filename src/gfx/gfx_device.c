@@ -400,6 +400,31 @@ static void gfx_seed_mouse(void) {
     gfx.mouse_y = gfx_to_pixels(gy - (float)wy, gfx.window_ph, gfx.window_h);
 }
 
+/* Without XDG_RUNTIME_DIR, Wayland cannot be reached (unless WAYLAND_DISPLAY
+   is a path or WAYLAND_SOCKET hands over a connection), and libwayland says
+   so on stderr each time SDL tries it, twice a start. Then SDL is asked for
+   the drivers it would try anyway, in its order, without Wayland. The ones
+   SDL only uses when asked by name (offscreen, dummy, evdev) stay out, and
+   a program or user that named the drivers is left alone. True if it set
+   the hint, which the caller resets. */
+static bool gfx_skip_unreachable_wayland(void) {
+    const char *display = SDL_getenv("WAYLAND_DISPLAY");
+    if (SDL_getenv("XDG_RUNTIME_DIR") || SDL_getenv("WAYLAND_SOCKET") ||
+        (display && display[0] == '/') || SDL_GetHint(SDL_HINT_VIDEO_DRIVER))
+        return false;
+    char drivers[256] = "";
+    bool wayland = false;
+    for (int i = 0; i < SDL_GetNumVideoDrivers(); i++) {
+        const char *d = SDL_GetVideoDriver(i);
+        if (!strcmp(d, "wayland")) wayland = true;
+        else if (strcmp(d, "offscreen") && strcmp(d, "dummy") && strcmp(d, "evdev"))
+            SDL_snprintf(drivers + strlen(drivers), sizeof drivers - strlen(drivers), "%s%s",
+                         drivers[0] ? "," : "", d);
+    }
+    if (!wayland || !drivers[0]) return false;
+    return SDL_SetHint(SDL_HINT_VIDEO_DRIVER, drivers);
+}
+
 static bool gfx_start(bool windowed, gs_gfx_bytes title, int64_t width, int64_t height,
                       int64_t flags) {
     if (gfx.dev) return gfx_misuse("gfx is already open: close() it first");
@@ -413,7 +438,15 @@ static bool gfx_start(bool windowed, gs_gfx_bytes title, int64_t width, int64_t 
     gfx_init_tables();
     SDL_SetAssertionHandler(gfx_assert_handler, NULL);
     SDL_SetHint(SDL_HINT_APP_NAME, "Goose");
-    if (!SDL_InitSubSystem(SDL_INIT_VIDEO)) {
+    bool hinted = gfx_skip_unreachable_wayland();
+    bool video = SDL_InitSubSystem(SDL_INIT_VIDEO);
+    if (hinted) {
+        SDL_ResetHint(SDL_HINT_VIDEO_DRIVER);
+        /* What SDL says when none of its own drivers starts, not "x11 not
+           available". */
+        if (!video) SDL_SetError("No available video device");
+    }
+    if (!video) {
         if (windowed) return gfx_sdl_fail("initializing SDL video");
         /* With no display to open a window on, the offscreen video driver
            still gives SDL_GPU the video device it requires. */
