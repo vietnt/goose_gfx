@@ -170,6 +170,16 @@ fields in the same order, and the same constant values.
   released after a query alone is reset by the next submit first, so that
   buffer would never be cleaned up (`docs/sdl-fence-release-leak.md`, with
   a repro using SDL alone).
+  Overlapping frames hold more memory, flat rather than growing: a target
+  cleared every frame is cycled, so SDL keeps a copy for each frame the GPU
+  may still be using, up to three. For the screen's colour and depth at
+  1920 x 1080 that is four more 8 MiB textures, which SDL puts in one more
+  64 MiB memory block. Rome_goose's G8 scene holds about 67 MiB more paced
+  than flushing every frame, and logging SDL's allocations in that scene
+  shows this block and these four textures as the whole difference. Rome's renderer cycles its cleared targets the
+  same way. Clearing without cycling would give the memory back at the cost
+  of the overlap (each frame's clear waiting for the last frame's reads of
+  that target), so frame() keeps it.
 * **Everything is in pixels.** A window always asks for the display's full
   pixel density, so on a high-density display its screen has more pixels
   than its size in the display's coordinates, which SDL gives the mouse in:
