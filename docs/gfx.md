@@ -353,17 +353,16 @@ until CI or a Mac runs them.
   function's slice parameter produces invalid C at `-O1`/`-O2` (bind it to a
   local first); and a struct field's default cannot name a global constant
   (the gfx descriptions spell their defaults as numbers).
-* **API**: gamepads and audio (SDL has them all), indirect draws,
-  stencil, blend constants, debug labels, depth readback of a mip above 0,
-  an array layer, a cube face or a 3D texture, checking uniform block
-  member offsets rather than size alone, and readback forms that return a
-  fresh array of an explicit element type (`read_buffer<f32>(b, n)`) beside
-  the ones that append to an out-array.
-* **Blocked outside goose_gfx.** These need SDL itself to change, and
-  wait for it: GPU timestamps (SDL_GPU has no timestamp queries), GPU
-  memory budget and usage (no query either), copies from a buffer into a
-  texture on the GPU (SDL_GPU uploads into textures from transfer buffers
-  only), and compressed-texture downloads on Direct3D 12 (above).
+* **API**: gamepads and audio (SDL has them all), depth readback of a mip
+  above 0, an array layer, a cube face or a 3D texture, checking uniform
+  block member offsets rather than size alone, and readback forms that
+  return a fresh array of an explicit element type (`read_buffer<f32>(b, n)`)
+  beside the ones that append to an out-array.
+* **Blocked outside goose_gfx.** Compressed-texture downloads on Direct3D
+  12 (above) need SDL itself to change. GPU time (`gpu_time()`), GPU memory
+  (`memory_info()`) and copies from a buffer into a texture on the GPU
+  (`copy_buffer_to_texture()`) needed it too; they use the API that
+  vietnt/SDL `rome-3.4` adds.
 * **Shader built-ins from the compiler fork.** `gl_FragDepth`,
   `gl_FrontFacing`, `gl_SampleID`, `textureGather`, `textureQueryLod`,
   `texture(s, P, bias)` and `demote` are in `embed_shader`'s GLSL front end
