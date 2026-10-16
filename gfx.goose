@@ -739,7 +739,8 @@ extern "gs_gfx_read_texture" fn read_texture_into(t: Texture, region: const Regi
                                                   out: u8[:]) -> bool;
 // A depth texture reads back as one f32 a texel, D16 and D24 normalized to
 // 0..1, from mip 0 of a 2D texture: SDL_GPU cannot download depth on every
-// backend, so it is drawn into an R32F target first.
+// backend, so it is drawn into an R32F target first. A multisampled color
+// texture reads back resolved, as its resolve target would get it.
 fn read_texture(t: Texture, region: Region, out: u8[:]) -> bool {
     let target = depth_copy(t, region, out.len);
     let all = Region {};

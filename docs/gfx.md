@@ -241,6 +241,11 @@ fields in the same order, and the same constant values.
   where it cannot, the read fails with the reason in `error()`. Mip 0 of a
   2D texture is what reads back; another mip, a layer, a cube or a
   multisampled depth texture is a misuse.
+* **Multisampled color textures** read back resolved, their samples
+  averaged as a pass's resolve target gets them: the read records a render
+  pass that loads the texture and resolves it into a texture of its own,
+  keeping the samples, and downloads that. Integer formats cannot be
+  resolved, so reading them is a misuse, as reading multisampled depth is.
 * **Block-compressed textures** (BC1, BC3, BC4, BC5, BC7) are SAMPLED only,
   with a width and height that are multiples of 4, as Direct3D 12 requires.
   Their regions are whole 4 x 4 blocks, but where a mip's right or bottom

@@ -596,10 +596,45 @@ static void gfx_readback_free(gfx_readback_slot *r) {
     gfx_fence_drop(r->fence);
 }
 
+/* A multisampled texture reads back resolved, which SDL does for color
+   formats other than integer ones. */
 static bool gfx_readable(gfx_texture_slot *s, const char *what) {
-    if (s->desc.samples > 1)
-        return gfx_misuse("%s: a multisampled texture; read the texture it resolves to", what);
+    if (s->desc.samples > 1 && gfx_is_depth(s->format))
+        return gfx_misuse("%s: a multisampled depth texture, which cannot be resolved", what);
+    if (s->desc.samples > 1 && (s->format == SDL_GPU_TEXTUREFORMAT_R32_UINT ||
+                                s->format == SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UINT))
+        return gfx_misuse("%s: a multisampled integer texture, which cannot be resolved", what);
     return true;
+}
+
+/* Resolves multisampled `s` into a texture of its own, in a render pass
+   that keeps the samples, for `reg` to download from instead. */
+static SDL_GPUTexture *gfx_resolve_for_read(SDL_GPUCommandBuffer *cb, gfx_texture_slot *s,
+                                            SDL_GPUTextureRegion *reg) {
+    SDL_GPUTextureCreateInfo ci;
+    SDL_zero(ci);
+    ci.type = SDL_GPU_TEXTURETYPE_2D;
+    ci.format = s->format;
+    ci.usage = SDL_GPU_TEXTUREUSAGE_COLOR_TARGET;
+    ci.width = (Uint32)s->desc.width;
+    ci.height = (Uint32)s->desc.height;
+    ci.layer_count_or_depth = 1;
+    ci.num_levels = 1;
+    ci.sample_count = SDL_GPU_SAMPLECOUNT_1;
+    SDL_GPUTexture *resolved = SDL_CreateGPUTexture(gfx.dev, &ci);
+    if (!resolved) {
+        gfx_sdl_fail("creating a texture to resolve into");
+        return NULL;
+    }
+    SDL_GPUColorTargetInfo ct;
+    SDL_zero(ct);
+    ct.texture = s->tex;
+    ct.load_op = SDL_GPU_LOADOP_LOAD;
+    ct.store_op = SDL_GPU_STOREOP_RESOLVE_AND_STORE;
+    ct.resolve_texture = resolved;
+    SDL_EndGPURenderPass(SDL_BeginGPURenderPass(cb, &ct, 1, NULL));
+    reg->texture = resolved;
+    return resolved;
 }
 
 /* gfx.goose reads a depth texture by drawing it into an R32F target, which
@@ -643,15 +678,20 @@ static gs_gfx_readback gfx_request_texture(gs_gfx_texture t, const gs_gfx_region
     }
     SDL_GPUCommandBuffer *cb = gfx_copy_cmd(false, what);
     if (!cb) return h;
+    SDL_GPUTexture *resolved = NULL;
+    if (s->desc.samples > 1 && !(resolved = gfx_resolve_for_read(cb, s, &reg))) return h;
     gfx_readback_slot *r = gfx_readback_new((uint32_t)size, &h);
-    if (!r) return h;
-    SDL_GPUCopyPass *cp = SDL_BeginGPUCopyPass(cb);
-    SDL_GPUTextureTransferInfo dst;
-    SDL_zero(dst);
-    dst.transfer_buffer = r->tb;
-    gfx_transfer_layout(&dst, &reg, s->format);
-    SDL_DownloadFromGPUTexture(cp, &reg, &dst);
-    SDL_EndGPUCopyPass(cp);
+    if (r) {
+        SDL_GPUCopyPass *cp = SDL_BeginGPUCopyPass(cb);
+        SDL_GPUTextureTransferInfo dst;
+        SDL_zero(dst);
+        dst.transfer_buffer = r->tb;
+        gfx_transfer_layout(&dst, &reg, s->format);
+        SDL_DownloadFromGPUTexture(cp, &reg, &dst);
+        SDL_EndGPUCopyPass(cp);
+    }
+    /* SDL frees it once the command buffer is done with it. */
+    if (resolved) SDL_ReleaseGPUTexture(gfx.dev, resolved);
     return h;
 }
 
