@@ -25,6 +25,8 @@ bool gfx_texture_format(int32_t format, SDL_GPUTextureFormat *out) {
         case GS_GFX_RGB10A2: *out = SDL_GPU_TEXTUREFORMAT_R10G10B10A2_UNORM; return true;
         case GS_GFX_RG11B10F: *out = SDL_GPU_TEXTUREFORMAT_R11G11B10_UFLOAT; return true;
         case GS_GFX_R16: *out = SDL_GPU_TEXTUREFORMAT_R16_UNORM; return true;
+        case GS_GFX_RG16: *out = SDL_GPU_TEXTUREFORMAT_R16G16_UNORM; return true;
+        case GS_GFX_RGBA16: *out = SDL_GPU_TEXTUREFORMAT_R16G16B16A16_UNORM; return true;
         case GS_GFX_DEPTH16: *out = SDL_GPU_TEXTUREFORMAT_D16_UNORM; return true;
         case GS_GFX_DEPTH24: *out = SDL_GPU_TEXTUREFORMAT_D24_UNORM; return true;
         case GS_GFX_DEPTH32F: *out = SDL_GPU_TEXTUREFORMAT_D32_FLOAT; return true;

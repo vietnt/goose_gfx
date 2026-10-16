@@ -106,7 +106,9 @@ let R32UI: i32 = 12;
 let RGBA8UI: i32 = 13;
 let RGB10A2: i32 = 14;
 let RG11B10F: i32 = 15;
-let R16: i32 = 26;              // one 16-bit unsigned normalized channel
+let R16: i32 = 26;              // 16-bit unsigned normalized channels: one, two, four
+let RG16: i32 = 27;
+let RGBA16: i32 = 28;
 let DEPTH16: i32 = 16;
 let DEPTH24: i32 = 17;
 let DEPTH32F: i32 = 18;
@@ -759,7 +761,7 @@ extern "gs_gfx_release_texture" fn release(t: Texture);
 fn texel_size(format: i32) -> i64 {
     if format == R8 { return 1; }
     if format == RG8 || format == R16F || format == R16 { return 2; }
-    if format == RGBA16F || format == RG32F { return 8; }
+    if format == RGBA16F || format == RGBA16 || format == RG32F { return 8; }
     if format == RGBA32F { return 16; }
     return 4;
 }
