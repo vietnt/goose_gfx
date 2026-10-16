@@ -21,7 +21,7 @@ fn resident_mb() -> i64 {
     while i < s.len && s[i] != 32 { i++; }
     var pages = 0;
     i++;
-    while i < s.len && s[i] >= 48 && s[i] <= 57 { pages = pages * 10 + (s[i] - 48) as i64; i++; }
+    while i < s.len && s[i] >= 48 && s[i] <= 57 { pages = pages * 10 + (s[i] - 48); i++; }
     return pages * 4096 / 1048576;
 }
 
@@ -65,7 +65,7 @@ fn main() {
         gfx::draw(3);
         gfx::end_pass();
         if frame < 8 {
-            gfx::begin_pass(marker, gfx::Texture { 0 }, float4 { (frame * 32) as f32 / 255.0, 0.0, 0.0, 1.0 });
+            gfx::begin_pass(marker, gfx::Texture { 0 }, float4 { (frame * 32) / 255.0, 0.0, 0.0, 1.0 });
             gfx::end_pass();
             reads[frame] = gfx::read_texture_async(marker);
         }

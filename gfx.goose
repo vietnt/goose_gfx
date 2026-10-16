@@ -613,7 +613,7 @@ fn depth_copy(t: Texture, region: Region, bytes: i64) -> Texture {
     let x = if region.w == 0 { 0 } else { region.x };
     let y = if region.w == 0 { 0 } else { region.y };
     if x < 0 || y < 0 || w < 1 || h < 1 || x + w > info.width || y + h > info.height ||
-       (bytes >= 0 && bytes != 4 * w as i64 * h as i64) {
+       (bytes >= 0 && bytes != 4 * w as i64 * h) {
         return Texture { 0 };
     }
     if depth_reader.opened != open_count() {

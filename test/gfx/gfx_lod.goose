@@ -117,7 +117,7 @@ fn main() {
         gfx::bind(c.p);
         gfx::bind_texture(gfx::FRAGMENT, 0, c.t, gfx::sampler(c.s));
         if c.p.id != implicit.id {
-            gfx::uniforms(gfx::FRAGMENT, 0, Lod { lod: c.lod, layer: c.layer as f32 });
+            gfx::uniforms(gfx::FRAGMENT, 0, Lod { lod: c.lod, layer: c.layer });
         }
         gfx::draw(3);
         gfx::end_pass();
