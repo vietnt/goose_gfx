@@ -243,12 +243,20 @@ fields in the same order, and the same constant values.
   the ring is held by copies the frame has not submitted, is staged in a
   buffer of its own as before. `upload_info()` reports the buffers' size,
   what is staged in the current one, what the other still holds for the GPU,
-  the most held at once, and the bytes of the buffers that exist. After 120
-  frames in a row with nothing staged both buffers are released, SDL
-  freeing them once the GPU is done with them, and the next upload makes
-  them again, so a program that has loaded its world does not keep them
-  mapped (`gfx_upload_idle`). Uploads were staged one transfer buffer each,
-  all of them kept until the GPU was done with their frame
+  the most held at once, and the bytes of the buffers that exist; it calls
+  the full size `capacity`, which does not change, and an upload that fits
+  `capacity - staged` never waits. At the end of a frame that uploaded, the
+  other buffer is taken from its start if the GPU is done with it, so
+  uploads made every frame reuse the start of each buffer instead of
+  walking through both (`gfx_upload_rewind`). After 120 frames in a row
+  each uploading less than 1/64 of the capacity, both buffers are released,
+  SDL freeing them once the GPU is done with them, and those made after are
+  8 MB; an upload that does not fit what is left of one lets both go and
+  goes on at the full capacity, without waiting. So a game that has loaded
+  its world and then uploads less than that a frame keeps 16 MB of staging
+  however long it runs, and a program that uploads nothing keeps none
+  (`gfx_upload_shrink`). Uploads were staged one transfer buffer each, all
+  of them kept until the GPU was done with their frame
   (`gfx_upload_staging`, `gfx_upload_large`, `gfx_upload_order`).
 * **A readback** is recorded in the frame's command buffer, into a
   transfer buffer of its own, and is pending

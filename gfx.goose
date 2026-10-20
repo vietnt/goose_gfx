@@ -296,12 +296,12 @@ struct MemoryInfo {
 
 // What upload_info() reports.
 struct UploadInfo {
-    buffer_bytes: i64 = 0,  // each staging buffer's size: 128 MB, 64 MB under 4 GB of GPU memory
+    capacity: i64 = 0,      // each staging buffer's full size, fixed: 128 MB, 64 MB under 4 GB of GPU memory
     buffers: i64 = 0,       // how many there are: 2
     staged: i64 = 0,        // bytes taken in the buffer being filled
     waiting: i64 = 0,       // bytes in the other that the GPU may still copy from; 0 once free
     peak: i64 = 0,          // the most both have held at once since open
-    allocated: i64 = 0,     // the bytes of the buffers that exist now: 0 after 120 frames with no upload
+    allocated: i64 = 0,     // the bytes of the buffers that exist now: 16 MB or 0 once uploads are light
 }
 
 // Part of one mip of one layer of a texture; w == 0 is the whole mip.
@@ -481,11 +481,13 @@ extern "gs_gfx_uploads" fn upload_info_into(out: UploadInfo&) -> bool;
 // fit what is left sends that buffer's copies to the GPU and goes on in the
 // other, first waiting for the GPU to finish copying from it if it has
 // not. So staging never takes more than the two buffers, and an upload
-// costs no wait while it fits buffer_bytes - staged, or buffer_bytes more
-// when waiting is 0. A region bigger than a buffer goes in parts. Copies
-// keep their order with the draws around them, as before. After 120
-// frames in a row with nothing uploaded both buffers are released, and the
-// next upload makes them again.
+// costs no wait while it fits capacity - staged, or capacity more when
+// waiting is 0. A region bigger than a buffer goes in parts. Copies keep
+// their order with the draws around them, as before. Each frame that
+// uploads starts the other buffer from its start if the GPU is done with
+// it. After 120 frames in a row each uploading less than capacity / 64,
+// the buffers are released and made again at 8 MB; an upload that does
+// not fit those goes back to the full capacity, without waiting.
 fn upload_info() -> UploadInfo {
     var info = UploadInfo {};
     upload_info_into(info);

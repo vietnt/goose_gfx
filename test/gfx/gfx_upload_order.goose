@@ -46,7 +46,7 @@ fn main() {
         gfx::end_pass();
     }
     let info = gfx::upload_info();
-    print("the filler took more than the ring: ", 5 * filling.len > 2 * info.buffer_bytes);
+    print("the filler took more than the ring: ", 5 * filling.len > 2 * info.capacity);
     gfx::frame();
     for k in 3 {
         let px = gfx::read_pixels(targets[k]);

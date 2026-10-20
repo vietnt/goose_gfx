@@ -130,6 +130,17 @@ static SDL_GPUTransferBuffer *gfx_transfer(uint32_t size, bool upload) {
    of a compressed format) and 3D slices, and a buffer's bytes in parts of
    whole words.
 
+   At the end of a frame that staged something, the other buffer is taken
+   from its start if the GPU is done with it, so uploads made every frame
+   reuse the start of each buffer rather than walking through both. After
+   GFX_UPLOAD_IDLE_FRAMES frames in a row each staging less than 1/64 of
+   the capacity, both buffers are released (SDL frees them once the GPU is
+   done with them) and those made after are GFX_UPLOAD_SMALL; an upload
+   that does not fit what is left of a small one lets both go and goes on
+   at the full capacity. So a program that has loaded its world keeps 16 MB
+   of staging, however long it runs, and one that uploads nothing keeps
+   none.
+
    Where a copy is recorded does not change: a new resource's first
    contents go into fresh_cmd, which can be recorded anywhere, even inside a
    pass, since nothing earlier can be using the resource, and which is
@@ -231,21 +242,34 @@ void gfx_release_uploads(void) {
     gfx.upload_cur = 0;
 }
 
-/* After a frame's submit: GFX_UPLOAD_IDLE_FRAMES frames in a row with
-   nothing staged let both buffers go, so a program that has loaded its
-   world does not keep them mapped. SDL frees them once the GPU is done
-   with any copy from them. */
+bool gfx_upload_busy(const gfx_upload_slot *u) {
+    if (u->in_cmd || u->in_fresh) return true;
+    for (int i = 0; i < u->nfences; i++)
+        if (!gfx_fence_done(u->fences[i])) return true;
+    return false;
+}
+
+/* After a frame's submit: shrinks or releases the buffers after
+   GFX_UPLOAD_IDLE_FRAMES light or empty frames, else takes the other one
+   from its start if it is free. */
 void gfx_uploads_frame_ended(void) {
-    if (gfx.upload_staged) {
-        gfx.upload_staged = false;
-        gfx.upload_idle = 0;
+    uint64_t staged = gfx.upload_frame_bytes;
+    gfx.upload_frame_bytes = 0;
+    gfx.upload_idle = staged ? 0 : gfx.upload_idle + 1;
+    gfx.upload_light = staged < gfx.upload_capacity / 64 ? gfx.upload_light + 1 : 0;
+    bool shrink = gfx.upload_size > GFX_UPLOAD_SMALL && gfx.upload_light >= GFX_UPLOAD_IDLE_FRAMES;
+    if (shrink || gfx.upload_idle >= GFX_UPLOAD_IDLE_FRAMES) {
+        gfx_release_uploads();
+        if (gfx.upload_size > GFX_UPLOAD_SMALL) gfx.upload_size = GFX_UPLOAD_SMALL;
+        gfx.upload_light = gfx.upload_idle = 0;
         return;
     }
-    if (!gfx.uploads[0].tb && !gfx.uploads[1].tb) return;
-    if (++gfx.upload_idle >= GFX_UPLOAD_IDLE_FRAMES) {
-        gfx_release_uploads();
-        gfx.upload_idle = 0;
-    }
+    gfx_upload_slot *next = &gfx.uploads[1 - gfx.upload_cur];
+    if (!staged || gfx_upload_busy(next)) return;
+    for (int i = 0; i < next->nfences; i++) gfx_fence_drop(next->fences[i]);
+    next->nfences = 0;
+    next->used = 0;
+    gfx.upload_cur = 1 - gfx.upload_cur;
 }
 
 /* Sends the buffer's recorded copies to the GPU, so that waiting for it
@@ -274,9 +298,16 @@ typedef struct {
    many: at least one, or 0 on failure. */
 static uint32_t gfx_stage(uint32_t unit, uint32_t units, uint32_t align, gfx_staged *st) {
     SDL_zero(*st);
-    gfx.upload_staged = true;
     gfx_upload_slot *u = &gfx.uploads[gfx.upload_cur];
     uint32_t at = (u->used + align - 1) / align * align;
+    if (gfx.upload_size < gfx.upload_capacity && (uint64_t)at + (uint64_t)unit * units > gfx.upload_size) {
+        /* Copies recorded from the small buffers keep them until the GPU
+           has made them. */
+        gfx_release_uploads();
+        gfx.upload_size = gfx.upload_capacity;
+        u = &gfx.uploads[0];
+        at = 0;
+    }
     bool fits = unit <= gfx.upload_size;
     if (fits && u->tb && at + unit > gfx.upload_size) {
         gfx_upload_slot *next = &gfx.uploads[1 - gfx.upload_cur];
@@ -316,6 +347,7 @@ static uint32_t gfx_stage(uint32_t unit, uint32_t units, uint32_t align, gfx_sta
         st->tb = gfx_transfer(n * unit, true);
         if (!st->tb) return 0;
     }
+    gfx.upload_frame_bytes += (uint64_t)n * unit;
     st->p = (uint8_t *)SDL_MapGPUTransferBuffer(gfx.dev, st->tb, false);
     if (!st->p) {
         gfx_sdl_fail("mapping a transfer buffer");

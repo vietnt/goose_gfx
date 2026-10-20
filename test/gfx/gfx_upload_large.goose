@@ -31,7 +31,7 @@ fn main() {
     var bytes: u8[>..] = [];
     bytes.resize(w * h * 4, 0);
     for i in bytes.len { bytes[i] = ((i + (i >> 15) * 37) & 255) as u8; }
-    print("RGBA8 region bigger than a staging buffer: ", bytes.len > info.buffer_bytes);
+    print("RGBA8 region bigger than a staging buffer: ", bytes.len > info.capacity);
     let t = gfx::texture2d(w, h);
     gfx::update_texture(t, bytes);
     let back = gfx::read_pixels(t);
@@ -54,7 +54,7 @@ fn main() {
             blocks[at + 9] = (c >> 8) as u8;
         }
     }
-    print("BC3 region bigger than a staging buffer: ", blocks.len > info.buffer_bytes);
+    print("BC3 region bigger than a staging buffer: ", blocks.len > info.capacity);
     let bc = gfx::texture(gfx::TextureDesc { format: gfx::BC3, width: (bw * 4) as i32,
                                              height: (bh * 4) as i32 });
     gfx::update_texture(bc, blocks);

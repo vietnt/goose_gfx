@@ -38,13 +38,13 @@ fn main() {
     }
     let grown = resident_mb() - before;
     let info = gfx::upload_info();
-    let allowed = 2 * (info.buffer_bytes >> 20) + 24;
+    let allowed = 2 * (info.capacity >> 20) + 24;
     gfx::frame();
     let px = gfx::read_pixels(t);
-    let mb = info.buffer_bytes >> 20;
+    let mb = info.capacity >> 20;
     print("ring buffers of 64 or 128 MB: ", info.buffers == 2 && (mb == 64 || mb == 128));
     print("staging held more than one buffer and at most both: ",
-          info.peak > info.buffer_bytes && info.peak <= 2 * info.buffer_bytes);
+          info.peak > info.capacity && info.peak <= 2 * info.capacity);
     print("memory grew by no more than the ring's 2 buffers: ", before < 0 || grown <= allowed);
     if before >= 0 && grown > allowed { print("it grew by ", grown, " MB, more than ", allowed); }
     print("the last update arrived: ", px[0] == 74 && px[1] == 10 && px[4194303] == ((4194303 * 7 + 3) & 255));
