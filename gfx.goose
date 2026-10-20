@@ -301,6 +301,7 @@ struct UploadInfo {
     staged: i64 = 0,        // bytes taken in the buffer being filled
     waiting: i64 = 0,       // bytes in the other that the GPU may still copy from; 0 once free
     peak: i64 = 0,          // the most both have held at once since open
+    allocated: i64 = 0,     // the bytes of the buffers that exist now: 0 after 120 frames with no upload
 }
 
 // Part of one mip of one layer of a texture; w == 0 is the whole mip.
@@ -482,7 +483,9 @@ extern "gs_gfx_uploads" fn upload_info_into(out: UploadInfo&) -> bool;
 // not. So staging never takes more than the two buffers, and an upload
 // costs no wait while it fits buffer_bytes - staged, or buffer_bytes more
 // when waiting is 0. A region bigger than a buffer goes in parts. Copies
-// keep their order with the draws around them, as before.
+// keep their order with the draws around them, as before. After 120
+// frames in a row with nothing uploaded both buffers are released, and the
+// next upload makes them again.
 fn upload_info() -> UploadInfo {
     var info = UploadInfo {};
     upload_info_into(info);

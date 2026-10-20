@@ -243,7 +243,11 @@ fields in the same order, and the same constant values.
   the ring is held by copies the frame has not submitted, is staged in a
   buffer of its own as before. `upload_info()` reports the buffers' size,
   what is staged in the current one, what the other still holds for the GPU,
-  and the most held at once. Uploads were staged one transfer buffer each,
+  the most held at once, and the bytes of the buffers that exist. After 120
+  frames in a row with nothing staged both buffers are released, SDL
+  freeing them once the GPU is done with them, and the next upload makes
+  them again, so a program that has loaded its world does not keep them
+  mapped (`gfx_upload_idle`). Uploads were staged one transfer buffer each,
   all of them kept until the GPU was done with their frame
   (`gfx_upload_staging`, `gfx_upload_large`, `gfx_upload_order`).
 * **A readback** is recorded in the frame's command buffer, into a

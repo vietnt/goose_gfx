@@ -1,0 +1,6 @@
+buffers made by the upload: 1
+119 frames after the last upload, buffers: 1
+the 120th releases them, buffers: 0
+memory fell by most of the buffer's 64 MB: true
+a later upload makes a buffer again, buffers: 1
+its bytes off: 0

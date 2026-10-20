@@ -73,10 +73,11 @@ typedef struct {
 
 /* The upload ring: each staging buffer's bytes and how many there are; the
    bytes taken in the one being filled; those in the other that the GPU may
-   still be copying from, 0 when it is free; and the most both have held at
-   once since open. */
+   still be copying from, 0 when it is free; the most both have held at
+   once since open; and the bytes of the buffers that exist now, which are
+   released after 120 frames with no upload. */
 typedef struct {
-    int64_t buffer_bytes, buffers, staged, waiting, peak;
+    int64_t buffer_bytes, buffers, staged, waiting, peak, allocated;
 } gs_gfx_upload_info;
 
 typedef struct {

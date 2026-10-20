@@ -799,6 +799,8 @@ uint8_t gs_gfx_uploads(gs_gfx_upload_info *out) {
     for (int i = 0; !busy && i < other->nfences; i++) busy = !gfx_fence_done(other->fences[i]);
     out->waiting = busy ? other->used : 0;
     out->peak = gfx.upload_peak;
+    for (int i = 0; i < GFX_UPLOAD_BUFFERS; i++)
+        if (gfx.uploads[i].tb) out->allocated += gfx.upload_size;
     return 1;
 }
 
@@ -971,6 +973,7 @@ uint8_t gs_gfx_frame(void) {
     /* The first call starts the first frame; every later one ends one. */
     if (gfx.window && gfx.frames > 0) gfx_present();
     gfx_frame_submit();
+    gfx_uploads_frame_ended();
     memset(gfx.pressed_keys, 0, sizeof gfx.pressed_keys);
     memset(gfx.released_keys, 0, sizeof gfx.released_keys);
     gfx.pressed_buttons = gfx.released_buttons = 0;

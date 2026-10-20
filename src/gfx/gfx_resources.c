@@ -228,6 +228,24 @@ void gfx_release_uploads(void) {
         if (u->tb) SDL_ReleaseGPUTransferBuffer(gfx.dev, u->tb);
     }
     memset(gfx.uploads, 0, sizeof gfx.uploads);
+    gfx.upload_cur = 0;
+}
+
+/* After a frame's submit: GFX_UPLOAD_IDLE_FRAMES frames in a row with
+   nothing staged let both buffers go, so a program that has loaded its
+   world does not keep them mapped. SDL frees them once the GPU is done
+   with any copy from them. */
+void gfx_uploads_frame_ended(void) {
+    if (gfx.upload_staged) {
+        gfx.upload_staged = false;
+        gfx.upload_idle = 0;
+        return;
+    }
+    if (!gfx.uploads[0].tb && !gfx.uploads[1].tb) return;
+    if (++gfx.upload_idle >= GFX_UPLOAD_IDLE_FRAMES) {
+        gfx_release_uploads();
+        gfx.upload_idle = 0;
+    }
 }
 
 /* Sends the buffer's recorded copies to the GPU, so that waiting for it
@@ -256,6 +274,7 @@ typedef struct {
    many: at least one, or 0 on failure. */
 static uint32_t gfx_stage(uint32_t unit, uint32_t units, uint32_t align, gfx_staged *st) {
     SDL_zero(*st);
+    gfx.upload_staged = true;
     gfx_upload_slot *u = &gfx.uploads[gfx.upload_cur];
     uint32_t at = (u->used + align - 1) / align * align;
     bool fits = unit <= gfx.upload_size;

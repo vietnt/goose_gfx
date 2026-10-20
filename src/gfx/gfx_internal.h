@@ -71,6 +71,7 @@ typedef struct {
    that read from it, which must signal before it is written from the
    start again. */
 #define GFX_UPLOAD_BUFFERS 2
+#define GFX_UPLOAD_IDLE_FRAMES 120
 typedef struct {
     SDL_GPUTransferBuffer *tb;
     uint32_t used;
@@ -238,9 +239,15 @@ typedef struct {
     /* Every upload is staged in the ring (gfx_resources.c), upload_size
        bytes a buffer; first contents of new resources are copied in
        fresh_cmd, submitted before the frame's command buffer each time
-       that is; upload_peak is the most the ring has held at once. */
+       that is; upload_peak is the most the ring has held at once. The
+       buffers are released after GFX_UPLOAD_IDLE_FRAMES frames in a row
+       with nothing staged (upload_idle counts them; upload_staged is set by
+       staging in the frame being recorded), and made again by the next
+       upload. */
     gfx_upload_slot uploads[GFX_UPLOAD_BUFFERS];
     int upload_cur;
+    int upload_idle;
+    bool upload_staged;
     uint32_t upload_size;
     int64_t upload_peak;
     SDL_GPUCommandBuffer *fresh_cmd;
@@ -305,6 +312,7 @@ void gfx_uploads_submitted(gfx_fence *f);
 bool gfx_uploads_in_cmd(void);
 uint32_t gfx_upload_size_for_device(void);
 void gfx_release_uploads(void);
+void gfx_uploads_frame_ended(void);
 
 /* The Goose format constants, mapped. */
 bool gfx_texture_format(int32_t format, SDL_GPUTextureFormat *out);
