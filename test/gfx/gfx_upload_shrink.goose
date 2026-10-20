@@ -1,12 +1,12 @@
 // The upload ring shrinks once uploads are light, grows back for a load,
 // and lets its buffers go once uploads stop. A load of 192 MB fills both
 // full-size buffers; then a 256 KB field is updated every frame, which is
-// light. 119 frames on the buffers are still full size, and the 120th
+// light. 29 frames on the buffers are still full size, and the 30th
 // releases them for 8 MB ones. Where the process's memory can be read, it
 // falls by most of the load's staging, and stays flat over 160 more frames
 // of the field, where full-size buffers kept and walked through by its
 // updates grew it by 31 MB on Lavapipe. A 64 MB load after that goes back to a full-size buffer and
-// arrives whole, and 120 frames with no upload at all release it.
+// arrives whole, and 30 frames with no upload at all release it.
 import gfx from "../..";
 import std;
 import os;
@@ -53,13 +53,13 @@ fn main() {
         gfx::update_texture(field, fb);
         gfx::frame();
     }
-    for i in 119 { update_field(); }
-    print("119 light frames on, still full size: ", gfx::upload_info().allocated == 2 * cap);
+    for i in 29 { update_field(); }
+    print("29 light frames on, still full size: ", gfx::upload_info().allocated == 2 * cap);
     let before = resident_mb();
     update_field();
     for i in 10 { update_field(); }
     let small = gfx::upload_info().allocated;
-    print("the 120th shrinks them to 8 MB buffers: ", small > 0 && small <= 16 * 1048576);
+    print("the 30th shrinks them to 8 MB buffers: ", small > 0 && small <= 16 * 1048576);
     let shrunk = resident_mb();
     print("memory fell by most of the load's staging: ", before < 0 || before - shrunk >= 96);
     if before >= 0 && before - shrunk < 96 { print("it fell by ", before - shrunk, " MB"); }
@@ -78,10 +78,10 @@ fn main() {
     var off = 0;
     for i in bytes.len { if back[i] != bytes[i] { off++; } }
     print("its bytes off: ", off);
-    frames(119);
-    print("119 frames with no upload, buffers: ", gfx::upload_info().allocated / cap);
+    frames(29);
+    print("29 frames with no upload, buffers: ", gfx::upload_info().allocated / cap);
     gfx::frame();
-    print("the 120th releases them, buffers: ", gfx::upload_info().allocated / cap);
+    print("the 30th releases them, buffers: ", gfx::upload_info().allocated / cap);
     gfx::check();
     gfx::close();
 }

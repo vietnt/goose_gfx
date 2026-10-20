@@ -1,10 +1,10 @@
 the load made both full-size buffers: true
-119 light frames on, still full size: true
-the 120th shrinks them to 8 MB buffers: true
+29 light frames on, still full size: true
+the 30th shrinks them to 8 MB buffers: true
 memory fell by most of the load's staging: true
 160 more frames of the field, memory flat: true
 the last field update arrived: true
 a 64 MB load goes back to a full-size buffer: true
 its bytes off: 0
-119 frames with no upload, buffers: 1
-the 120th releases them, buffers: 0
+29 frames with no upload, buffers: 1
+the 30th releases them, buffers: 0

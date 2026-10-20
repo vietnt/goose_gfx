@@ -248,7 +248,7 @@ fields in the same order, and the same constant values.
   `capacity - staged` never waits. At the end of a frame that uploaded, the
   other buffer is taken from its start if the GPU is done with it, so
   uploads made every frame reuse the start of each buffer instead of
-  walking through both (`gfx_upload_rewind`). After 120 frames in a row
+  walking through both (`gfx_upload_rewind`). After 30 frames in a row
   each uploading less than 1/64 of the capacity, both buffers are released,
   SDL freeing them once the GPU is done with them, and those made after are
   8 MB; an upload that does not fit what is left of one lets both go and

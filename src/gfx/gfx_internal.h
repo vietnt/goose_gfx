@@ -71,7 +71,7 @@ typedef struct {
    that read from it, which must signal before it is written from the
    start again. */
 #define GFX_UPLOAD_BUFFERS 2
-#define GFX_UPLOAD_IDLE_FRAMES 120
+#define GFX_UPLOAD_IDLE_FRAMES 30
 #define GFX_UPLOAD_SMALL (8u << 20)
 typedef struct {
     SDL_GPUTransferBuffer *tb;

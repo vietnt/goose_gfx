@@ -485,7 +485,7 @@ extern "gs_gfx_uploads" fn upload_info_into(out: UploadInfo&) -> bool;
 // waiting is 0. A region bigger than a buffer goes in parts. Copies keep
 // their order with the draws around them, as before. Each frame that
 // uploads starts the other buffer from its start if the GPU is done with
-// it. After 120 frames in a row each uploading less than capacity / 64,
+// it. After 30 frames in a row each uploading less than capacity / 64,
 // the buffers are released and made again at 8 MB; an upload that does
 // not fit those goes back to the full capacity, without waiting.
 fn upload_info() -> UploadInfo {

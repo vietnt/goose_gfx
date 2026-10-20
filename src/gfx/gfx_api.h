@@ -76,7 +76,7 @@ typedef struct {
    one being filled; those in the other that the GPU may still be copying
    from, 0 when it is free; the most both have held at once since open; and
    the bytes of the buffers that exist now, less than the full size once
-   uploads have been light for 120 frames. */
+   uploads have been light for 30 frames. */
 typedef struct {
     int64_t capacity, buffers, staged, waiting, peak, allocated;
 } gs_gfx_upload_info;
