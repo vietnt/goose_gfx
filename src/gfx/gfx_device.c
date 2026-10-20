@@ -316,8 +316,9 @@ void gs_gfx_set_buffer_name(gs_gfx_buffer b, gs_gfx_bytes name) {
 }
 
 bool gfx_submit(void) {
+    gfx_submit_fresh_uploads();
     if (!gfx.cmd) return true;
-    if (gfx.readbacks_pending) {
+    if (gfx.readbacks_pending || gfx_uploads_in_cmd()) {
         gfx_fence *f = gfx_submit_fenced();
         gfx_fence_drop(f);
         return f != NULL;
@@ -342,6 +343,7 @@ static void gfx_attach(void *item) {
 gfx_fence *gfx_submit_fenced(void) {
     /* An empty command buffer's fence still follows all earlier work on the
        queue. */
+    gfx_submit_fresh_uploads();
     SDL_GPUCommandBuffer *cb = gfx_cmd();
     gfx_fence *f = NULL;
     if (cb) {
@@ -355,6 +357,7 @@ gfx_fence *gfx_submit_fenced(void) {
             gfx_sdl_fail("submitting commands");
         }
     }
+    gfx_uploads_submitted(f);
     if (gfx.readbacks_pending) {
         gfx_attach_fence = f;
         gfx_table_each(&gfx.readbacks, gfx_attach);
@@ -714,6 +717,7 @@ static bool gfx_start(bool windowed, gs_gfx_bytes title, int64_t width, int64_t 
                    timing.supports_timing;
     gfx.gpu_time = -1.0;
     gfx.gpu_time_frame = -1;
+    gfx.upload_size = gfx_upload_size_for_device();
     gfx.start_ns = gfx.last_ns = SDL_GetTicksNS();
     gfx.inject_event = SDL_RegisterEvents(1);
     gfx_opens++;
@@ -739,6 +743,7 @@ void gs_gfx_close(void) {
         SDL_WaitForGPUIdle(gfx.dev);
         for (int i = 0; i < gfx.nin_flight; i++) gfx_fence_drop(gfx.in_flight[i]);
         gfx.nin_flight = 0;
+        gfx_release_uploads();
         gfx_release_pipelines();
         gfx_release_resources();
         if (gfx.window) SDL_ReleaseWindowFromGPUDevice(gfx.dev, gfx.window);
@@ -780,6 +785,20 @@ uint8_t gs_gfx_gpu_memory(gs_gfx_memory_info *out) {
     out->architecture = (int32_t)info.architecture;
     out->kind = (int32_t)info.kind;
     out->bytes = (int64_t)info.bytes;
+    return 1;
+}
+
+uint8_t gs_gfx_uploads(gs_gfx_upload_info *out) {
+    memset(out, 0, sizeof *out);
+    if (!gfx_need_device("upload_info")) return 0;
+    out->buffer_bytes = gfx.upload_size;
+    out->buffers = GFX_UPLOAD_BUFFERS;
+    out->staged = gfx.uploads[gfx.upload_cur].used;
+    gfx_upload_slot *other = &gfx.uploads[1 - gfx.upload_cur];
+    bool busy = other->in_cmd || other->in_fresh;
+    for (int i = 0; !busy && i < other->nfences; i++) busy = !gfx_fence_done(other->fences[i]);
+    out->waiting = busy ? other->used : 0;
+    out->peak = gfx.upload_peak;
     return 1;
 }
 

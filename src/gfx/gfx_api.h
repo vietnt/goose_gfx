@@ -71,6 +71,14 @@ typedef struct {
     int64_t bytes;
 } gs_gfx_memory_info;
 
+/* The upload ring: each staging buffer's bytes and how many there are; the
+   bytes taken in the one being filled; those in the other that the GPU may
+   still be copying from, 0 when it is free; and the most both have held at
+   once since open. */
+typedef struct {
+    int64_t buffer_bytes, buffers, staged, waiting, peak;
+} gs_gfx_upload_info;
+
 typedef struct {
     int32_t kind, format, usage;
     int32_t width, height;
@@ -146,6 +154,7 @@ typedef struct {
     X(int64_t, gs_gfx_driver, (gs_gfx_bytes out)) \
     X(int64_t, gs_gfx_present_mode, (void)) \
     X(uint8_t, gs_gfx_gpu_memory, (gs_gfx_memory_info *out)) \
+    X(uint8_t, gs_gfx_uploads, (gs_gfx_upload_info *out)) \
     X(uint8_t, gs_gfx_frame, (void)) \
     X(void, gs_gfx_quit, (void)) \
     X(void, gs_gfx_flush, (void)) \

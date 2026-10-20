@@ -1,0 +1,4 @@
+RGBA8 region bigger than a staging buffer: true
+bytes off: 0, checksum 2316241348506, uploaded 2316241348506
+BC3 region bigger than a staging buffer: true
+BC3 blocks that sampled another colour: 0 of 8519680

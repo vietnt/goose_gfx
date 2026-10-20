@@ -219,12 +219,35 @@ fields in the same order, and the same constant values.
   only per-instance inputs reads buffer 1 from SDL's slot 0; vertex buffers
   are therefore bound into SDL at the draw, into the slots its pipeline
   reads them from (`gfx_instance_only`).
-* **Copies are in program order.** A new resource's first contents go through
-  a command buffer of their own; any other upload, readback or mip generation
-  is recorded in the frame's command buffer, and so happens between passes. A
+* **Copies are in program order.** A new resource's first contents (a
+  buffer's or texture's initial data, `load_texture` and its mips) go
+  through a command buffer of their own, which can be recorded anywhere,
+  even in a pass, and is submitted ahead of the frame's command buffer
+  every time that is; any other upload, readback or mip generation is
+  recorded in the frame's command buffer, and so happens between passes. A
   rewrite of a whole buffer lets SDL cycle it rather than wait for a draw still
-  using it. A readback is
-  recorded the same way, into a transfer buffer of its own, and is pending
+  using it.
+* **Uploads are staged in a ring** of two transfer buffers of 128 MB each, or
+  64 MB on a GPU that reports less than 4 GB (`SDL_GetGPUMemoryInfo`, as
+  `memory_info()`; Lavapipe reports system memory, so it gets 128 MB).
+  Each upload is appended to the buffer being filled, its rows 256 bytes
+  apart and its copies 512 bytes apart, which Direct3D 12 copies from
+  without a copy of its own. When an upload does not fit what is left, the
+  copies from that buffer are submitted, the frame's command buffer early if
+  they are in it, and the other buffer is filled from its start once the GPU
+  has finished every submit that read from it: the CPU waits there, so a
+  program loading its world before its first frame never holds more than the
+  two buffers of staging. A region bigger than a buffer goes in parts of
+  whole rows (block rows of a compressed format), one 3D slice at a time. A
+  part bigger than a buffer, or a first-contents upload inside a pass while
+  the ring is held by copies the frame has not submitted, is staged in a
+  buffer of its own as before. `upload_info()` reports the buffers' size,
+  what is staged in the current one, what the other still holds for the GPU,
+  and the most held at once. Uploads were staged one transfer buffer each,
+  all of them kept until the GPU was done with their frame
+  (`gfx_upload_staging`, `gfx_upload_large`, `gfx_upload_order`).
+* **A readback** is recorded in the frame's command buffer, into a
+  transfer buffer of its own, and is pending
   until that command buffer is submitted; the submit's fence is shared by
   every readback it carried, freed when the last lets go. `ready` polls
   it, `take` waits on it (submitting first, if the readback is still

@@ -119,17 +119,212 @@ static SDL_GPUTransferBuffer *gfx_transfer(uint32_t size, bool upload) {
     return tb;
 }
 
-/* Where a copy is recorded. A new resource's first contents go through a
-   command buffer of their own, submitted at once: it can be created
-   anywhere, even inside a pass, and nothing earlier can be using it. Any
+/* --- the upload ring ---------------------------------------------------------
+   Every upload is staged in one of two transfer buffers, upload_size bytes
+   each, appended to the one being filled. When an upload does not fit what
+   is left of it, its copies go to the GPU (the frame's command buffer is
+   submitted early if they are in it) and the other buffer is filled from
+   its start, once every submit that read from it has finished: the CPU
+   waits for the GPU there, and never holds more staging than the two
+   buffers. A region bigger than a buffer goes in parts, by rows (block rows
+   of a compressed format) and 3D slices, and a buffer's bytes in parts of
+   whole words.
+
+   Where a copy is recorded does not change: a new resource's first
+   contents go into fresh_cmd, which can be recorded anywhere, even inside a
+   pass, since nothing earlier can be using the resource, and which is
+   submitted ahead of the frame's command buffer every time that is; any
    other copy goes into the command buffer being recorded, in program order
-   with the draws around it, and so cannot happen inside a pass. */
-static SDL_GPUCommandBuffer *gfx_copy_cmd(bool fresh, const char *what) {
-    if (fresh) {
-        SDL_GPUCommandBuffer *cb = SDL_AcquireGPUCommandBuffer(gfx.dev);
-        if (!cb) gfx_sdl_fail("acquiring a command buffer");
-        return cb;
+   with the draws around it, and so cannot happen inside a pass. Copies in
+   the frame's command buffer keep their place among the draws, and those
+   in fresh_cmd land before any draw that can use their resource.
+
+   Texture rows are staged 256 bytes apart and copies start 512 bytes
+   apart, which Direct3D 12 needs to copy from the buffer itself rather than
+   from a temporary copy of the rows it makes otherwise. */
+
+/* 128 MB a buffer on a GPU with 4 GB or more, 64 MB otherwise or when SDL
+   cannot tell. */
+uint32_t gfx_upload_size_for_device(void) {
+    SDL_GPUMemoryInfo info;
+    SDL_zero(info);
+    bool known = SDL_GetGPUMemoryInfo(gfx.dev, &info) && info.kind != 0;
+    return known && info.bytes >= (Uint64)4 << 30 ? 128u << 20 : 64u << 20;
+}
+
+static SDL_GPUCommandBuffer *gfx_fresh_cmd(void) {
+    if (!gfx.fresh_cmd) {
+        gfx.fresh_cmd = SDL_AcquireGPUCommandBuffer(gfx.dev);
+        if (!gfx.fresh_cmd) gfx_sdl_fail("acquiring a command buffer");
     }
+    return gfx.fresh_cmd;
+}
+
+/* Gives `f` to the buffer, letting go of those of its fences that have
+   signalled. */
+static void gfx_upload_add_fence(gfx_upload_slot *u, gfx_fence *f) {
+    int n = 0;
+    for (int i = 0; i < u->nfences; i++) {
+        if (gfx_fence_done(u->fences[i])) gfx_fence_drop(u->fences[i]);
+        else u->fences[n++] = u->fences[i];
+    }
+    u->nfences = n;
+    if (u->nfences == u->fences_cap) {
+        int cap = u->fences_cap ? u->fences_cap * 2 : 4;
+        gfx_fence **grown = (gfx_fence **)realloc(u->fences, sizeof *grown * (size_t)cap);
+        if (!grown) {
+            gfx_fence_wait(f);
+            return;
+        }
+        u->fences = grown;
+        u->fences_cap = cap;
+    }
+    f->refs++;
+    u->fences[u->nfences++] = f;
+}
+
+void gfx_submit_fresh_uploads(void) {
+    SDL_GPUCommandBuffer *cb = gfx.fresh_cmd;
+    if (!cb) return;
+    gfx.fresh_cmd = NULL;
+    SDL_GPUFence *fence = SDL_SubmitGPUCommandBufferAndAcquireFence(cb);
+    gfx_fence *f = fence ? (gfx_fence *)calloc(1, sizeof *f) : NULL;
+    if (!fence) gfx_sdl_fail("submitting uploads");
+    else if (!f) SDL_WaitForGPUFences(gfx.dev, true, &fence, 1);
+    if (f) {
+        f->fence = fence;
+        f->refs = 1;
+    }
+    for (int i = 0; i < GFX_UPLOAD_BUFFERS; i++) {
+        gfx_upload_slot *u = &gfx.uploads[i];
+        if (!u->in_fresh) continue;
+        u->in_fresh = false;
+        if (f) gfx_upload_add_fence(u, f);
+    }
+    if (f) gfx_fence_drop(f);
+    else if (fence) SDL_ReleaseGPUFence(gfx.dev, fence);
+}
+
+void gfx_uploads_submitted(gfx_fence *f) {
+    for (int i = 0; i < GFX_UPLOAD_BUFFERS; i++) {
+        gfx_upload_slot *u = &gfx.uploads[i];
+        if (!u->in_cmd) continue;
+        u->in_cmd = false;
+        if (f) gfx_upload_add_fence(u, f);
+    }
+}
+
+bool gfx_uploads_in_cmd(void) {
+    for (int i = 0; i < GFX_UPLOAD_BUFFERS; i++)
+        if (gfx.uploads[i].in_cmd) return true;
+    return false;
+}
+
+void gfx_release_uploads(void) {
+    for (int i = 0; i < GFX_UPLOAD_BUFFERS; i++) {
+        gfx_upload_slot *u = &gfx.uploads[i];
+        for (int k = 0; k < u->nfences; k++) gfx_fence_drop(u->fences[k]);
+        free(u->fences);
+        if (u->tb) SDL_ReleaseGPUTransferBuffer(gfx.dev, u->tb);
+    }
+    memset(gfx.uploads, 0, sizeof gfx.uploads);
+}
+
+/* Sends the buffer's recorded copies to the GPU, so that waiting for it
+   waits for something submitted; false when they are in the frame's
+   command buffer while a pass is being recorded into it. */
+static bool gfx_upload_submit(gfx_upload_slot *u) {
+    if (u->in_fresh) gfx_submit_fresh_uploads();
+    if (!u->in_cmd) return true;
+    if (gfx.pass || gfx.cpass) return false;
+    gfx_fence_drop(gfx_submit_fenced());
+    return true;
+}
+
+/* Where an upload's bytes are staged: in a ring buffer (u), or in a
+   transfer buffer of their own (u NULL) when a part of it is bigger than a
+   ring buffer, or when a fresh upload inside a pass finds the ring held by
+   copies the frame has not submitted yet. */
+typedef struct {
+    gfx_upload_slot *u;
+    SDL_GPUTransferBuffer *tb;
+    uint32_t at;
+    uint8_t *p;
+} gfx_staged;
+
+/* Stages up to `units` units of `unit` bytes, `align`ed, and returns how
+   many: at least one, or 0 on failure. */
+static uint32_t gfx_stage(uint32_t unit, uint32_t units, uint32_t align, gfx_staged *st) {
+    SDL_zero(*st);
+    gfx_upload_slot *u = &gfx.uploads[gfx.upload_cur];
+    uint32_t at = (u->used + align - 1) / align * align;
+    bool fits = unit <= gfx.upload_size;
+    if (fits && u->tb && at + unit > gfx.upload_size) {
+        gfx_upload_slot *next = &gfx.uploads[1 - gfx.upload_cur];
+        gfx_upload_submit(u);
+        if (gfx_upload_submit(next)) {
+            for (int i = 0; i < next->nfences; i++) {
+                gfx_fence_wait(next->fences[i]);
+                gfx_fence_drop(next->fences[i]);
+            }
+            next->nfences = 0;
+            next->used = 0;
+            gfx.upload_cur = 1 - gfx.upload_cur;
+            u = next;
+            at = 0;
+        } else {
+            fits = false;
+        }
+    }
+    if (fits && !u->tb) {
+        u->tb = gfx_transfer(gfx.upload_size, true);
+        if (!u->tb) return 0;
+        u->used = 0;
+        at = 0;
+    }
+    uint32_t n = units;
+    if (fits) {
+        uint32_t room = (gfx.upload_size - at) / unit;
+        if (n > room) n = room;
+        st->u = u;
+        st->tb = u->tb;
+        st->at = at;
+        u->used = at + n * unit;
+        int64_t held = 0;
+        for (int i = 0; i < GFX_UPLOAD_BUFFERS; i++) held += gfx.uploads[i].used;
+        if (held > gfx.upload_peak) gfx.upload_peak = held;
+    } else {
+        st->tb = gfx_transfer(n * unit, true);
+        if (!st->tb) return 0;
+    }
+    st->p = (uint8_t *)SDL_MapGPUTransferBuffer(gfx.dev, st->tb, false);
+    if (!st->p) {
+        gfx_sdl_fail("mapping a transfer buffer");
+        if (!st->u) SDL_ReleaseGPUTransferBuffer(gfx.dev, st->tb);
+        return 0;
+    }
+    st->p += st->at;
+    return n;
+}
+
+/* After the staged bytes are written and their copy recorded: the ring
+   buffer now has copies in the command buffer, or the buffer of their own
+   goes once the GPU is done with it. */
+static void gfx_staged_recorded(gfx_staged *st, bool fresh) {
+    if (!st->u) {
+        SDL_ReleaseGPUTransferBuffer(gfx.dev, st->tb);
+        return;
+    }
+    if (fresh) st->u->in_fresh = true;
+    else st->u->in_cmd = true;
+}
+
+/* The command buffer a copy is recorded into, after it is staged: staging
+   can submit the frame's command buffer. */
+static SDL_GPUCommandBuffer *gfx_upload_cmd(bool fresh) { return fresh ? gfx_fresh_cmd() : gfx_cmd(); }
+
+static SDL_GPUCommandBuffer *gfx_copy_cmd(bool fresh, const char *what) {
+    if (fresh) return gfx_fresh_cmd();
     if (gfx.pass || gfx.cpass) {
         gfx_misuse("%s inside a %s pass: copies happen between passes", what,
                    gfx.pass ? "render" : "compute");
@@ -138,9 +333,10 @@ static SDL_GPUCommandBuffer *gfx_copy_cmd(bool fresh, const char *what) {
     return gfx_cmd();
 }
 
-static bool gfx_copy_done(SDL_GPUCommandBuffer *cb, bool fresh) {
-    if (!fresh) return true;
-    return SDL_SubmitGPUCommandBuffer(cb) || gfx_sdl_fail("submitting an upload");
+static bool gfx_copy_allowed(bool fresh, const char *what) {
+    if (fresh || !(gfx.pass || gfx.cpass)) return true;
+    return gfx_misuse("%s inside a %s pass: copies happen between passes", what,
+                      gfx.pass ? "render" : "compute");
 }
 
 /* Writes `len` bytes of `data` and then `zeros` zero bytes into `buf` at
@@ -151,24 +347,32 @@ static bool gfx_upload_buffer(SDL_GPUBuffer *buf, uint32_t offset, const void *d
                               const char *what) {
     uint32_t total = len + zeros;
     if (!total) return true;
-    SDL_GPUCommandBuffer *cb = gfx_copy_cmd(fresh, what);
-    if (!cb) return false;
-    SDL_GPUTransferBuffer *tb = gfx_transfer(total, true);
-    if (!tb) {
-        if (fresh) SDL_CancelGPUCommandBuffer(cb);
-        return false;
+    if (!gfx_copy_allowed(fresh, what)) return false;
+    for (uint32_t pos = 0; pos < total;) {
+        gfx_staged st;
+        uint32_t words = gfx_stage(4, (total - pos + 3) / 4, 16, &st);
+        if (!words) return false;
+        uint32_t n = words * 4 < total - pos ? words * 4 : total - pos;
+        uint32_t from_data = pos < len ? (len - pos < n ? len - pos : n) : 0;
+        if (from_data) memcpy(st.p, (const uint8_t *)data + pos, from_data);
+        if (n > from_data) memset(st.p + from_data, 0, n - from_data);
+        SDL_UnmapGPUTransferBuffer(gfx.dev, st.tb);
+        SDL_GPUCommandBuffer *cb = gfx_upload_cmd(fresh);
+        if (!cb) {
+            if (!st.u) SDL_ReleaseGPUTransferBuffer(gfx.dev, st.tb);
+            return false;
+        }
+        SDL_GPUCopyPass *cp = SDL_BeginGPUCopyPass(cb);
+        SDL_GPUTransferBufferLocation src = { st.tb, st.at };
+        SDL_GPUBufferRegion dst = { buf, offset + pos, n };
+        /* Only the first part may cycle: a later one writes into what it
+           cycled to. */
+        SDL_UploadToGPUBuffer(cp, &src, &dst, cycle && pos == 0);
+        SDL_EndGPUCopyPass(cp);
+        gfx_staged_recorded(&st, fresh);
+        pos += n;
     }
-    uint8_t *p = (uint8_t *)SDL_MapGPUTransferBuffer(gfx.dev, tb, false);
-    if (len) memcpy(p, data, len);
-    if (zeros) memset(p + len, 0, zeros);
-    SDL_UnmapGPUTransferBuffer(gfx.dev, tb);
-    SDL_GPUCopyPass *cp = SDL_BeginGPUCopyPass(cb);
-    SDL_GPUTransferBufferLocation src = { tb, 0 };
-    SDL_GPUBufferRegion dst = { buf, offset, total };
-    SDL_UploadToGPUBuffer(cp, &src, &dst, cycle);
-    SDL_EndGPUCopyPass(cp);
-    SDL_ReleaseGPUTransferBuffer(gfx.dev, tb);
-    return gfx_copy_done(cb, fresh);
+    return true;
 }
 
 /* --- buffers --------------------------------------------------------------- */
@@ -488,27 +692,48 @@ static void gfx_transfer_layout(SDL_GPUTextureTransferInfo *t, const SDL_GPUText
     t->rows_per_layer = (reg->h + b - 1) / b * b;
 }
 
+/* `data` is the region's rows tightly packed, as update_texture takes
+   them; they are staged in parts of whole (block) rows of one slice each. */
 static bool gfx_upload_texture(const SDL_GPUTextureRegion *reg, SDL_GPUTextureFormat format,
-                               const void *data, uint32_t len, bool fresh, const char *what) {
-    SDL_GPUCommandBuffer *cb = gfx_copy_cmd(fresh, what);
-    if (!cb) return false;
-    SDL_GPUTransferBuffer *tb = gfx_transfer(len, true);
-    if (!tb) {
-        if (fresh) SDL_CancelGPUCommandBuffer(cb);
-        return false;
+                               const void *data, bool fresh, const char *what) {
+    if (!gfx_copy_allowed(fresh, what)) return false;
+    uint32_t b = gfx_block(format), block_bytes = SDL_GPUTextureFormatTexelBlockSize(format);
+    uint32_t row = (reg->w + b - 1) / b * block_bytes, rows = (reg->h + b - 1) / b;
+    uint32_t pitch = (row + 255) / 256 * 256;
+    const uint8_t *src = (const uint8_t *)data;
+    for (uint32_t z = 0; z < reg->d; z++) {
+        for (uint32_t y = 0; y < rows;) {
+            gfx_staged st;
+            uint32_t n = gfx_stage(pitch, rows - y, 512, &st);
+            if (!n) return false;
+            const uint8_t *from = src + ((size_t)z * rows + y) * row;
+            if (pitch == row) memcpy(st.p, from, (size_t)n * row);
+            else
+                for (uint32_t i = 0; i < n; i++) memcpy(st.p + (size_t)i * pitch, from + (size_t)i * row, row);
+            SDL_UnmapGPUTransferBuffer(gfx.dev, st.tb);
+            SDL_GPUCommandBuffer *cb = gfx_upload_cmd(fresh);
+            if (!cb) {
+                if (!st.u) SDL_ReleaseGPUTransferBuffer(gfx.dev, st.tb);
+                return false;
+            }
+            SDL_GPUTextureRegion part = *reg;
+            part.y = reg->y + y * b;
+            part.h = n * b < reg->h - y * b ? n * b : reg->h - y * b;
+            part.z = reg->z + z;
+            part.d = 1;
+            SDL_GPUTextureTransferInfo t;
+            SDL_zero(t);
+            t.transfer_buffer = st.tb;
+            t.offset = st.at;
+            t.pixels_per_row = pitch / block_bytes * b;
+            SDL_GPUCopyPass *cp = SDL_BeginGPUCopyPass(cb);
+            SDL_UploadToGPUTexture(cp, &t, &part, false);
+            SDL_EndGPUCopyPass(cp);
+            gfx_staged_recorded(&st, fresh);
+            y += n;
+        }
     }
-    void *p = SDL_MapGPUTransferBuffer(gfx.dev, tb, false);
-    memcpy(p, data, len);
-    SDL_UnmapGPUTransferBuffer(gfx.dev, tb);
-    SDL_GPUCopyPass *cp = SDL_BeginGPUCopyPass(cb);
-    SDL_GPUTextureTransferInfo src;
-    SDL_zero(src);
-    src.transfer_buffer = tb;
-    gfx_transfer_layout(&src, reg, format);
-    SDL_UploadToGPUTexture(cp, &src, reg, false);
-    SDL_EndGPUCopyPass(cp);
-    SDL_ReleaseGPUTransferBuffer(gfx.dev, tb);
-    return gfx_copy_done(cb, fresh);
+    return true;
 }
 
 uint8_t gs_gfx_update_texture(gs_gfx_texture t, const gs_gfx_region *region, gs_gfx_bytes data) {
@@ -520,7 +745,7 @@ uint8_t gs_gfx_update_texture(gs_gfx_texture t, const gs_gfx_region *region, gs_
     if (!gfx_region(s, region, &reg, "update_texture") ||
         !gfx_texture_bytes(s, &reg, data.len, "update_texture"))
         return 0;
-    return gfx_upload_texture(&reg, s->format, data.data, (uint32_t)data.len, false, "update_texture");
+    return gfx_upload_texture(&reg, s->format, data.data, false, "update_texture");
 }
 
 uint8_t gs_gfx_copy_buffer_to_texture(gs_gfx_buffer b, int64_t offset, gs_gfx_texture t,
@@ -896,15 +1121,12 @@ gs_gfx_texture gs_gfx_load_texture(gs_gfx_bytes path, int64_t flags) {
         gs_gfx_region r = { 0 };
         SDL_GPUTextureRegion reg;
         gfx_region(s, &r, &reg, "load_texture");
-        bool ok = gfx_upload_texture(&reg, s->format, tight, (uint32_t)(row * (size_t)rgba->h), true,
-                                     "load_texture");
+        bool ok = gfx_upload_texture(&reg, s->format, tight, true, "load_texture");
         free(tight);
         if (ok && s->desc.mips > 1) {
-            SDL_GPUCommandBuffer *cb = SDL_AcquireGPUCommandBuffer(gfx.dev);
-            if (cb) {
-                SDL_GenerateMipmapsForGPUTexture(cb, s->tex);
-                SDL_SubmitGPUCommandBuffer(cb);
-            }
+            /* After the upload, in the same command buffer. */
+            SDL_GPUCommandBuffer *cb = gfx_fresh_cmd();
+            if (cb) SDL_GenerateMipmapsForGPUTexture(cb, s->tex);
         }
         if (!ok) {
             gs_gfx_release_texture(h);

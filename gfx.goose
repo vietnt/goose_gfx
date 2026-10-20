@@ -294,6 +294,15 @@ struct MemoryInfo {
     bytes: i64 = 0,
 }
 
+// What upload_info() reports.
+struct UploadInfo {
+    buffer_bytes: i64 = 0,  // each staging buffer's size: 128 MB, 64 MB under 4 GB of GPU memory
+    buffers: i64 = 0,       // how many there are: 2
+    staged: i64 = 0,        // bytes taken in the buffer being filled
+    waiting: i64 = 0,       // bytes in the other that the GPU may still copy from; 0 once free
+    peak: i64 = 0,          // the most both have held at once since open
+}
+
 // Part of one mip of one layer of a texture; w == 0 is the whole mip.
 struct Region {
     mip: i32 = 0,
@@ -462,6 +471,21 @@ extern "gs_gfx_gpu_memory" fn memory_info_into(out: MemoryInfo&) -> bool;
 fn memory_info() -> MemoryInfo {
     var info = MemoryInfo {};
     memory_info_into(info);
+    info
+}
+extern "gs_gfx_uploads" fn upload_info_into(out: UploadInfo&) -> bool;
+// The ring every upload's bytes are staged in on their way to the GPU:
+// buffer(), update_buffer(), update_texture() and load_texture()
+// alike. An upload appends to the buffer being filled; one that does not
+// fit what is left sends that buffer's copies to the GPU and goes on in the
+// other, first waiting for the GPU to finish copying from it if it has
+// not. So staging never takes more than the two buffers, and an upload
+// costs no wait while it fits buffer_bytes - staged, or buffer_bytes more
+// when waiting is 0. A region bigger than a buffer goes in parts. Copies
+// keep their order with the draws around them, as before.
+fn upload_info() -> UploadInfo {
+    var info = UploadInfo {};
+    upload_info_into(info);
     info
 }
 

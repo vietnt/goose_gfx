@@ -65,6 +65,20 @@ typedef struct {
     bool signaled;
 } gfx_fence;
 
+/* One of the upload ring's staging buffers: how much of it is taken,
+   whether copies from it are recorded in the frame's command buffer or the
+   fresh-upload one and not yet submitted, and the fences of the submits
+   that read from it, which must signal before it is written from the
+   start again. */
+#define GFX_UPLOAD_BUFFERS 2
+typedef struct {
+    SDL_GPUTransferBuffer *tb;
+    uint32_t used;
+    bool in_cmd, in_fresh;
+    gfx_fence **fences;
+    int nfences, fences_cap;
+} gfx_upload_slot;
+
 /* A download recorded in the command buffer being recorded: pending until
    that is submitted, then waiting on the submit's fence. */
 typedef struct {
@@ -221,6 +235,16 @@ typedef struct {
     char error[1024];
     int64_t misuse;
 
+    /* Every upload is staged in the ring (gfx_resources.c), upload_size
+       bytes a buffer; first contents of new resources are copied in
+       fresh_cmd, submitted before the frame's command buffer each time
+       that is; upload_peak is the most the ring has held at once. */
+    gfx_upload_slot uploads[GFX_UPLOAD_BUFFERS];
+    int upload_cur;
+    uint32_t upload_size;
+    int64_t upload_peak;
+    SDL_GPUCommandBuffer *fresh_cmd;
+
     gfx_table buffers, textures, samplers, pipelines, computes, readbacks;
     int readbacks_pending;              /* recorded and not yet submitted */
     /* The fences of frame submits the GPU may not have done, oldest first,
@@ -273,6 +297,14 @@ gfx_fence *gfx_submit_fenced(void);
 bool gfx_fence_wait(gfx_fence *f);
 bool gfx_fence_done(gfx_fence *f);
 void gfx_fence_drop(gfx_fence *f);
+/* The upload ring's side of a submit: the fresh uploads go first, and a
+   submit of the frame's command buffer gives its fence to the buffers its
+   copies read. */
+void gfx_submit_fresh_uploads(void);
+void gfx_uploads_submitted(gfx_fence *f);
+bool gfx_uploads_in_cmd(void);
+uint32_t gfx_upload_size_for_device(void);
+void gfx_release_uploads(void);
 
 /* The Goose format constants, mapped. */
 bool gfx_texture_format(int32_t format, SDL_GPUTextureFormat *out);

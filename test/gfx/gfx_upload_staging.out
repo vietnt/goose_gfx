@@ -1,0 +1,4 @@
+ring buffers of 64 or 128 MB: true
+staging held more than one buffer and at most both: true
+memory grew by no more than the ring's 2 buffers: true
+the last update arrived: true
