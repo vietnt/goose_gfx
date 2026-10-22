@@ -390,6 +390,7 @@ typedef struct {
     X(uint8_t, gs_ui_font_atlas_is_baked, (gs_ui_font_atlas a)) \
     X(void, gs_ui_font_atlas_size, (gs_ui_font_atlas a, gs_ui_int2 *out)) \
     X(int64_t, gs_ui_font_atlas_pixels, (gs_ui_font_atlas a, gs_ui_bytes out)) \
+    X(int64_t, gs_ui_font_atlas_pixels_at, (gs_ui_font_atlas a, int64_t offset, gs_ui_bytes out)) \
     X(void, gs_ui_set_font_atlas_texture, (gs_ui_font_atlas a, uint32_t texture)) \
     X(uint32_t, gs_ui_font_atlas_texture, (gs_ui_font_atlas a)) \
     X(gs_ui_font_atlas, gs_ui_font_atlas_without_texture, (void)) \

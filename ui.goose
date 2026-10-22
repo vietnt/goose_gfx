@@ -752,6 +752,9 @@ fn atlas_pixels(a: FontAtlas) -> u8[>..] {
     atlas_pixels_into(a, px);
     return px;
 }
+// The image's bytes from `offset` on, as many as `out` holds; returns the
+// image's size in bytes, as atlas_pixels_into does.
+extern "gs_ui_font_atlas_pixels_at" fn atlas_pixels_at(a: FontAtlas, offset: i64, out: u8[:]) -> i64;
 // The texture a renderer uploaded the image to, which the atlas's text is
 // drawn with; 0 for none yet.
 extern "gs_ui_set_font_atlas_texture" fn set_texture(a: FontAtlas, texture: u32);
@@ -1871,6 +1874,7 @@ fn ensure_buffer(b: gfx::Buffer&, capacity: i64&, usage: i32, bytes: i64) {
 // atlases; a 0 is a free slot. A global array only grows: a program's
 // global strings could be views of it.
 var renderer_textures: u32[>..] = [];
+let ATLAS_BAND = 65536;     // the most bytes of an atlas uploaded at once
 
 // Uploads the image of every baked atlas no texture holds yet, and releases
 // the textures of those destroyed.
@@ -1887,7 +1891,21 @@ fn upload_atlases() {
         if a.id == 0 { break; }
         let size = atlas_size(a);
         let t = gfx::texture2d(size.x, size.y);
-        gfx::update_texture(t, atlas_pixels(a));
+        // In bands of rows: the whole image would sit on the data stack, 4 MB
+        // for a 512 x 2048 atlas.
+        let row = size.x as i64 * 4;
+        let height = size.y as i64;
+        let band = max(1, ATLAS_BAND / row);
+        var px: u8[>..] = [];
+        px.resize(min(band, height) * row, 0);
+        var y = 0;
+        while y < height {
+            let n = min(band, height - y);
+            atlas_pixels_at(a, y * row, px);
+            gfx::update_texture(t, gfx::Region { y: y as i32, w: size.x, h: n as i32 },
+                                px[0 .. n * row]);
+            y += n;
+        }
         set_texture(a, t.id);
         let free = position(renderer_textures, 0);
         if free >= 0 { renderer_textures[free] = t.id; } else { renderer_textures.push(t.id); }

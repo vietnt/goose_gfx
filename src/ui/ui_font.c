@@ -460,6 +460,19 @@ int64_t gs_ui_font_atlas_pixels(gs_ui_font_atlas h, gs_ui_bytes out) {
     return ui_copy_out(a->pixels, (int64_t)a->width * a->height * 4, out);
 }
 
+int64_t gs_ui_font_atlas_pixels_at(gs_ui_font_atlas h, int64_t offset, gs_ui_bytes out) {
+    ui_atlas *a = ui_atlas_get(h, "ui::atlas_pixels_at");
+    if (!a) return 0;
+    int64_t n = (int64_t)a->width * a->height * 4;
+    if (offset < 0 || offset > n) {
+        ui_misuse("ui::atlas_pixels_at: offset %lld of a %lld-byte image", (long long)offset,
+                  (long long)n);
+        return n;
+    }
+    ui_copy_out(a->pixels + offset, n - offset, out);
+    return n;
+}
+
 void gs_ui_set_font_atlas_texture(gs_ui_font_atlas h, uint32_t texture) {
     ui_atlas *a = ui_atlas_get(h, "ui::set_texture");
     if (!a) return;
