@@ -5,6 +5,37 @@
 #include "gfx_internal.h"
 
 #include <stdlib.h>
+#if defined(_WIN32)
+#include <windows.h>
+#elif defined(__unix__) || defined(__APPLE__)
+#include <sys/mman.h>
+#endif
+
+/* Pages for a decoded picture that lives only until its upload. macOS's malloc
+   keeps a freed large block dirty in the process (Hana's rig atlas is 47 MiB),
+   so a picture gets pages of its own, handed back whole when it is freed. */
+static void *gfx_pages(size_t n) {
+#if defined(_WIN32)
+    return VirtualAlloc(NULL, n, MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE);
+#elif defined(__unix__) || defined(__APPLE__)
+    void *p = mmap(NULL, n, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANON, -1, 0);
+    return p == MAP_FAILED ? NULL : p;
+#else
+    return malloc(n);
+#endif
+}
+
+static void gfx_free_pages(void *p, size_t n) {
+#if defined(_WIN32)
+    (void)n;
+    VirtualFree(p, 0, MEM_RELEASE);
+#elif defined(__unix__) || defined(__APPLE__)
+    munmap(p, n);
+#else
+    (void)n;
+    free(p);
+#endif
+}
 
 /* --- formats --------------------------------------------------------------- */
 
@@ -914,15 +945,24 @@ gs_gfx_texture gs_gfx_load_texture(gs_gfx_bytes path, int64_t flags) {
        through an SDL surface, converted only when it is not RGBA already. */
     uint8_t *px = NULL;
     int w = 0, ht = 0;
+    size_t bytes = 0;
     SDL_Surface *surf = NULL;
     if (webp) {
         size_t size = 0;
         void *file = SDL_LoadFile(buf, &size);
-        bool read = file != NULL;
-        if (read) px = WebPDecodeRGBA((const uint8_t *)file, size, &w, &ht);
+        const char *why = file ? "not a WebP image" : SDL_GetError();
+        if (file && WebPGetInfo((const uint8_t *)file, size, &w, &ht)) {
+            bytes = (size_t)w * 4 * (size_t)ht;
+            px = (uint8_t *)gfx_pages(bytes);
+            if (!px) why = "out of memory";
+            else if (!WebPDecodeRGBAInto((const uint8_t *)file, size, px, bytes, w * 4)) {
+                gfx_free_pages(px, bytes);
+                px = NULL;
+            }
+        }
         SDL_free(file);
         if (!px) {
-            gfx_fail("cannot load %s: %s", buf, read ? "not a WebP image" : SDL_GetError());
+            gfx_fail("cannot load %s: %s", buf, why);
             return h;
         }
     } else {
@@ -981,7 +1021,7 @@ gs_gfx_texture gs_gfx_load_texture(gs_gfx_bytes path, int64_t flags) {
             h.id = 0;
         }
     }
-    if (webp) WebPFree(px);
+    if (webp) gfx_free_pages(px, bytes);
     else {
         if (px != surf->pixels) free(px);
         SDL_DestroySurface(surf);
