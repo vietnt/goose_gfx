@@ -47,6 +47,11 @@ int main(void) {
     CHECK(gs_audio_set_volume(0.5f) && gs_audio_volume() == 0.5f);
     CHECK(gs_audio_render((gs_audio_f32_slice){ two, 2 }) && two[0] == 0.1875f);
     CHECK(!gs_audio_set_volume(1.5f) && gs_audio_volume() == 0.5f);
+    CHECK(gs_audio_set_volume(1));
+    gs_audio_stop_all();
+    gs_audio_voice back = gs_audio_play(steps, 1, 0, 1, 0);
+    CHECK(gs_audio_seek(back, 1.0 / 48000) && gs_audio_render((gs_audio_f32_slice){ two, 2 }) && two[0] == 0.25f);
+    CHECK(gs_audio_seek(back, 1) && !gs_audio_playing(back) && !gs_audio_seek(back, 0));
     gs_audio_close();
     CHECK(gs_audio_open(48000, 1) && gs_audio_volume() == 1);
     gs_audio_close();

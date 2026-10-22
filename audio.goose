@@ -81,6 +81,9 @@ extern "gs_audio_paused" fn paused() -> bool;
 // the voices go on. False, with an error, for a volume out of range.
 extern "gs_audio_set_volume" fn set_volume(volume: f32) -> bool;
 extern "gs_audio_volume" fn volume() -> f32;
+// A voice moved to `seconds` into its sound (a looping one wraps); past a
+// sound's end it stops. False, with an error, for a voice not playing.
+extern "gs_audio_seek" fn seek(voice: Voice, seconds: f64) -> bool;
 // Update without restarting. A completed voice returns false with an error.
 extern "gs_audio_set_voice" fn set_voice(voice: Voice, volume: f32,
                                          pan: f32, pitch: f32) -> bool;

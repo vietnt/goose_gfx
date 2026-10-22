@@ -373,6 +373,23 @@ uint8_t gs_audio_set_volume(float volume) {
 
 float gs_audio_volume(void) { return audio.open ? audio.volume : 1; }
 
+uint8_t gs_audio_seek(gs_audio_voice voice, double seconds) {
+    audio_lock();
+    audio_voice *slot = audio_find_voice(voice);
+    bool ok = false;
+    if (!slot) audio_fail("voice is no longer playing");
+    else if (!(seconds >= 0 && seconds < 1e9)) audio_fail("seek: seconds must be 0 or more (finite)");
+    else {
+        double at = seconds * slot->sound->rate;
+        if (at < (double)slot->sound->frames) slot->position = at;
+        else if (slot->loop) slot->position = fmod(at, (double)slot->sound->frames);
+        else slot->id = 0;
+        ok = true;
+    }
+    audio_unlock();
+    return ok;
+}
+
 uint8_t gs_audio_set_voice(gs_audio_voice voice, float volume, float pan, float pitch) {
     audio_lock();
     audio_voice *slot = audio_find_voice(voice);

@@ -36,6 +36,7 @@ GS_AUDIO_CONSTANTS(GS_AUDIO_CONST)
     X(uint8_t, gs_audio_paused, (void)) \
     X(uint8_t, gs_audio_set_volume, (float volume)) \
     X(float, gs_audio_volume, (void)) \
+    X(uint8_t, gs_audio_seek, (gs_audio_voice voice, double seconds)) \
     X(uint8_t, gs_audio_set_voice, (gs_audio_voice voice, float volume, float pan, float pitch)) \
     X(uint8_t, gs_audio_render, (gs_audio_f32_slice out))
 
