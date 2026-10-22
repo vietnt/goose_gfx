@@ -876,6 +876,48 @@ static SDL_Surface *gfx_load_webp(const char *path) {
     return s;
 }
 
+// A JPEG's size, from its first start-of-frame marker; false if it has none.
+static bool gfx_jpeg_size(const uint8_t *d, size_t n, int *w, int *h) {
+    if (n < 4 || d[0] != 0xFF || d[1] != 0xD8) return false;
+    size_t i = 2;
+    while (i + 9 < n) {
+        if (d[i] != 0xFF) return false;
+        uint8_t m = d[i + 1];
+        if (m == 0xFF) { i++; continue; }
+        size_t len = (size_t)d[i + 2] << 8 | d[i + 3];
+        // SOF0..SOF15, less DHT (C4), JPG (C8) and DAC (CC)
+        if (m >= 0xC0 && m <= 0xCF && m != 0xC4 && m != 0xC8 && m != 0xCC) {
+            *h = d[i + 5] << 8 | d[i + 6];
+            *w = d[i + 7] << 8 | d[i + 8];
+            return *w > 0 && *h > 0;
+        }
+        i += 2 + len;
+    }
+    return false;
+}
+
+// A JPEG file as an RGBA surface, decoded by SDL's own stb_image (SDL_ConvertPixels from
+// MJPG), or NULL with SDL's error set.
+static SDL_Surface *gfx_load_jpeg(const char *path) {
+    size_t size = 0;
+    void *file = SDL_LoadFile(path, &size);
+    if (!file) return NULL;
+    int w = 0, h = 0;
+    SDL_Surface *s = NULL;
+    if (!gfx_jpeg_size((const uint8_t *)file, size, &w, &h) || size > INT32_MAX) {
+        SDL_SetError("not a JPEG image");
+    } else {
+        s = SDL_CreateSurface(w, h, SDL_PIXELFORMAT_RGBA32);
+        if (s && !SDL_ConvertPixels(w, h, SDL_PIXELFORMAT_MJPG, file, (int)size, SDL_PIXELFORMAT_RGBA32,
+                                    s->pixels, s->pitch)) {
+            SDL_DestroySurface(s);
+            s = NULL;
+        }
+    }
+    SDL_free(file);
+    return s;
+}
+
 gs_gfx_texture gs_gfx_load_texture(gs_gfx_bytes path, int64_t flags) {
     gs_gfx_texture h = { 0 };
     if (!gfx_need_device("load_texture")) return h;
@@ -886,7 +928,12 @@ gs_gfx_texture gs_gfx_load_texture(gs_gfx_bytes path, int64_t flags) {
     buf[n] = 0;
     bool bmp = n >= 4 && SDL_strcasecmp(buf + n - 4, ".bmp") == 0;
     bool webp = n >= 5 && SDL_strcasecmp(buf + n - 5, ".webp") == 0;
-    SDL_Surface *loaded = bmp ? SDL_LoadBMP(buf) : webp ? gfx_load_webp(buf) : SDL_LoadPNG(buf);
+    bool jpeg = (n >= 4 && SDL_strcasecmp(buf + n - 4, ".jpg") == 0) ||
+                (n >= 5 && SDL_strcasecmp(buf + n - 5, ".jpeg") == 0);
+    SDL_Surface *loaded = bmp    ? SDL_LoadBMP(buf)
+                          : webp ? gfx_load_webp(buf)
+                          : jpeg ? gfx_load_jpeg(buf)
+                                 : SDL_LoadPNG(buf);
     if (!loaded) {
         gfx_fail("cannot load %s: %s", buf, SDL_GetError());
         return h;

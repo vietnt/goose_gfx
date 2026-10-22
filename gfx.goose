@@ -714,7 +714,7 @@ fn texture_array(width: i64, height: i64, layers: i64, format: i32, usage: i32) 
     texture(TextureDesc { kind: TEXTURE_2D_ARRAY, format: format, usage: usage,
                           width: width as i32, height: height as i32, depth: layers as i32 })
 }
-// A PNG, WebP or BMP (by its extension) as an RGBA8 texture, with its mips
+// A PNG, WebP, JPEG or BMP (by its extension) as an RGBA8 texture, with its mips
 // when flags has LOAD_MIPS.
 extern "gs_gfx_load_texture" fn load_texture(path: const u8[:], flags: i64) -> Texture;
 
