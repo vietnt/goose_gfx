@@ -79,8 +79,9 @@ target_link_libraries(goose_gfx PUBLIC SDL3::SDL3-static)
 target_include_directories(goose_gfx PRIVATE "${GOOSE_GFX_SDL}/src/video/khronos")
 
 # --- the audio layer: the PCM mixer, no window ---------------------------------
-add_library(goose_audio STATIC src/audio/audio.c src/audio/audio_api.h)
+add_library(goose_audio STATIC src/audio/audio.c src/audio/audio_api.h src/audio/dr_mp3_impl.c)
 target_link_libraries(goose_audio PUBLIC SDL3::SDL3-static)
+target_include_directories(goose_audio PRIVATE third_party/dr_libs)
 
 # --- the ui layer: Nuklear, one header, compiled once in ui_nuklear.c ----------
 set(ui_layer_sources
@@ -109,6 +110,7 @@ if(MSVC)
     endforeach()
     set_source_files_properties(${ui_layer_sources} PROPERTIES COMPILE_OPTIONS "/W4;/utf-8")
     set_source_files_properties(src/ui/ui_nuklear.c PROPERTIES COMPILE_OPTIONS "/W0;/utf-8")
+    set_source_files_properties(src/audio/dr_mp3_impl.c PROPERTIES COMPILE_OPTIONS "/W0;/utf-8")
     foreach(t IN ITEMS goose_gfx goose_audio goose_ui)
         target_compile_definitions(${t} PRIVATE _CRT_SECURE_NO_WARNINGS)
     endforeach()
@@ -119,6 +121,7 @@ else()
     set_source_files_properties(${ui_layer_sources} PROPERTIES COMPILE_OPTIONS
                                 "-Wall;-Wextra;-Wno-missing-field-initializers")
     set_source_files_properties(src/ui/ui_nuklear.c PROPERTIES COMPILE_OPTIONS "-w")
+    set_source_files_properties(src/audio/dr_mp3_impl.c PROPERTIES COMPILE_OPTIONS "-w")
 endif()
 
 # --- the package -------------------------------------------------------------

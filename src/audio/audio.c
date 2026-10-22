@@ -3,6 +3,8 @@
    that lock so loading a sound does not block playback for its duration. */
 #include "audio_api.h"
 #include <SDL3/SDL.h>
+#define DR_MP3_NO_STDIO
+#include "dr_mp3.h"
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -187,53 +189,108 @@ int64_t gs_audio_error(gs_audio_bytes out) {
     return n;
 }
 
+// Puts owned samples (malloc'd, checked) in a free slot, or frees them.
+static gs_audio_sound audio_add_sound(float *owned, int64_t frames, int rate, int channels) {
+    gs_audio_sound result = { 0 };
+    audio_lock();
+    audio_sound *slot = NULL;
+    for (int i = 0; i < AUDIO_SOUNDS; ++i)
+        if (!audio.sounds[i].id) { slot = &audio.sounds[i]; break; }
+    if (!slot) audio_fail("all 256 sound slots are in use");
+    else if ((result.id = audio_id()) != 0)
+        *slot = (audio_sound){ result.id, owned, frames, rate, channels };
+    audio_unlock();
+    if (!result.id) free(owned);
+    return result;
+}
+
+static bool audio_is_open(void) {
+    audio_lock();
+    bool open = audio.open;
+    if (!open) audio_fail("audio is not open");
+    audio_unlock();
+    return open;
+}
+
+static void audio_failf(const char *what, const char *path, const char *why) {
+    audio_lock();
+    snprintf(audio.error, sizeof audio.error, "%s %s%s%s", what, path, why ? ": " : "", why ? why : "");
+    audio_unlock();
+}
+
 gs_audio_sound gs_audio_create_sound(gs_audio_f32_slice samples, int64_t sample_rate,
                                      int64_t channels) {
     gs_audio_sound result = { 0 };
+    if (!audio_is_open()) return result;
     audio_lock();
-    if (!audio.open) audio_fail("audio is not open");
-    else if (!audio_rate(sample_rate)) audio_fail("sample rate must be 8000..192000 Hz");
+    bool ok = false;
+    if (!audio_rate(sample_rate)) audio_fail("sample rate must be 8000..192000 Hz");
     else if (channels != 1 && channels != 2) audio_fail("a sound must have one or two channels");
     else if (!samples.data || samples.len <= 0 || samples.len % channels ||
              (uint64_t)samples.len > SIZE_MAX / sizeof(float))
         audio_fail("PCM must contain nonempty complete frames of mono or stereo samples");
-    else {
-        audio_sound *slot = NULL;
-        for (int i = 0; i < AUDIO_SOUNDS; ++i)
-            if (!audio.sounds[i].id) { slot = &audio.sounds[i]; break; }
-        if (!slot) audio_fail("all 256 sound slots are in use");
-        else {
-            // Only the main thread adds sounds; this slot stays free unlocked.
-            audio_unlock();
-            // Goose slices can originate in packed records. Copy before reading
-            // float values so validation never assumes source alignment.
-            float *copy = (float *)malloc((size_t)samples.len * sizeof(float));
-            if (!copy) {
-                audio_lock();
-                audio_fail("out of memory copying PCM samples");
-                audio_unlock();
-                return result;
-            }
-            memcpy(copy, samples.data, (size_t)samples.len * sizeof(float));
-            for (int64_t i = 0; i < samples.len; ++i) {
-                if (!(copy[i] >= -1 && copy[i] <= 1)) {
-                    free(copy);
-                    audio_lock();
-                    audio_fail("PCM samples must be finite and within [-1, 1]");
-                    audio_unlock();
-                    return result;
-                }
-            }
+    else ok = true;
+    audio_unlock();
+    if (!ok) return result;
+    // Goose slices can originate in packed records. Copy before reading
+    // float values so validation never assumes source alignment.
+    float *copy = (float *)malloc((size_t)samples.len * sizeof(float));
+    if (!copy) {
+        audio_lock();
+        audio_fail("out of memory copying PCM samples");
+        audio_unlock();
+        return result;
+    }
+    memcpy(copy, samples.data, (size_t)samples.len * sizeof(float));
+    for (int64_t i = 0; i < samples.len; ++i) {
+        if (!(copy[i] >= -1 && copy[i] <= 1)) {
+            free(copy);
             audio_lock();
-            result.id = audio_id();
-            if (result.id)
-                *slot = (audio_sound){ result.id, copy, samples.len / channels,
-                                       (int)sample_rate, (int)channels };
-            else free(copy);
+            audio_fail("PCM samples must be finite and within [-1, 1]");
+            audio_unlock();
+            return result;
         }
     }
-    audio_unlock();
-    return result;
+    return audio_add_sound(copy, samples.len / channels, (int)sample_rate, (int)channels);
+}
+
+static void *audio_malloc(size_t n, void *user) { (void)user; return malloc(n); }
+static void *audio_realloc(void *p, size_t n, void *user) { (void)user; return realloc(p, n); }
+static void audio_free(void *p, void *user) { (void)user; free(p); }
+
+gs_audio_sound gs_audio_load_sound(gs_audio_bytes path, double from, double to) {
+    gs_audio_sound result = { 0 };
+    if (!audio_is_open()) return result;
+    char name[1024];
+    size_t n = path.len < 0 || !path.data ? 0 : (size_t)path.len;
+    if (n >= sizeof name) n = sizeof name - 1;
+    if (n) memcpy(name, path.data, n);
+    name[n] = 0;
+    // SDL_LoadFile reads app bundles and, on Android, the APK's assets.
+    size_t size = 0;
+    void *file = SDL_LoadFile(name, &size);
+    if (!file) { audio_failf("cannot read", name, SDL_GetError()); return result; }
+    drmp3_allocation_callbacks heap = { NULL, audio_malloc, audio_realloc, audio_free };
+    drmp3_config config = { 0 };
+    drmp3_uint64 frames = 0;
+    float *pcm = drmp3_open_memory_and_read_pcm_frames_f32(file, size, &config, &frames, &heap);
+    SDL_free(file);
+    if (!pcm || !frames) { free(pcm); audio_failf("cannot decode", name, "not an MP3"); return result; }
+    int channels = (int)config.channels, rate = (int)config.sampleRate;
+    if ((channels != 1 && channels != 2) || !audio_rate(rate)) {
+        free(pcm);
+        audio_failf("cannot play", name, "not mono or stereo at 8000..192000 Hz");
+        return result;
+    }
+    int64_t first = from > 0 ? (int64_t)(from * rate) : 0;
+    int64_t end = to > 0 ? (int64_t)(to * rate) : (int64_t)frames;
+    if (end > (int64_t)frames) end = (int64_t)frames;
+    if (first >= end) { free(pcm); audio_failf("nothing to play in", name, "from is at or past to"); return result; }
+    int64_t count = (end - first) * channels;
+    if (first) memmove(pcm, pcm + first * channels, (size_t)count * sizeof(float));
+    // A decoder can overshoot full scale a little; the mixer takes [-1, 1].
+    for (int64_t i = 0; i < count; ++i) pcm[i] = pcm[i] > 1 ? 1 : pcm[i] < -1 ? -1 : pcm[i];
+    return audio_add_sound(pcm, end - first, rate, channels);
 }
 
 uint8_t gs_audio_release_sound(gs_audio_sound sound) {

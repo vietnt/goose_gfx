@@ -26,6 +26,7 @@ GS_AUDIO_CONSTANTS(GS_AUDIO_CONST)
     X(void, gs_audio_close, (void)) \
     X(int64_t, gs_audio_error, (gs_audio_bytes out)) \
     X(gs_audio_sound, gs_audio_create_sound, (gs_audio_f32_slice samples, int64_t sample_rate, int64_t channels)) \
+    X(gs_audio_sound, gs_audio_load_sound, (gs_audio_bytes path, double from, double to)) \
     X(uint8_t, gs_audio_release_sound, (gs_audio_sound sound)) \
     X(gs_audio_voice, gs_audio_play, (gs_audio_sound sound, float volume, float pan, float pitch, uint8_t loop)) \
     X(uint8_t, gs_audio_playing, (gs_audio_voice voice)) \

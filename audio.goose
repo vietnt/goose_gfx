@@ -44,6 +44,13 @@ fn create_sound(samples: const f32[:], sample_rate: i64 = 48000,
     create_sound_raw(samples, sample_rate, channels)
 }
 
+// An MP3 file decoded into native-owned storage at its own rate and channels,
+// from `from` seconds to `to` (0: its end); nothing passes through Goose.
+extern "gs_audio_load_sound" fn load_sound_raw(path: const u8[:], from: f64, to: f64) -> Sound;
+fn load_sound(path: const u8[:], from: f64 = 0.0, to: f64 = 0.0) -> Sound {
+    load_sound_raw(path, from, to)
+}
+
 // Stops every voice using the sound, then frees its samples. Zero is harmless;
 // a stale nonzero handle returns false with an error.
 extern "gs_audio_release_sound" fn release_sound(sound: Sound) -> bool;
