@@ -856,27 +856,6 @@ uint8_t gs_gfx_save_png(gs_gfx_texture t, gs_gfx_bytes path) {
     return ok;
 }
 
-// A WebP file as an RGBA surface, or NULL with SDL's error set.
-static SDL_Surface *gfx_load_webp(const char *path) {
-    size_t size = 0;
-    void *file = SDL_LoadFile(path, &size);
-    if (!file) return NULL;
-    int w = 0, h = 0;
-    uint8_t *px = WebPDecodeRGBA((const uint8_t *)file, size, &w, &h);
-    SDL_free(file);
-    if (!px) {
-        SDL_SetError("not a WebP image");
-        return NULL;
-    }
-    SDL_Surface *s = SDL_CreateSurface(w, h, SDL_PIXELFORMAT_RGBA32);
-    if (s)
-        for (int y = 0; y < h; y++)
-            memcpy((uint8_t *)s->pixels + (size_t)s->pitch * (size_t)y, px + (size_t)w * 4 * (size_t)y,
-                   (size_t)w * 4);
-    WebPFree(px);
-    return s;
-}
-
 // A JPEG's size, from its first start-of-frame marker; false if it has none.
 static bool gfx_jpeg_size(const uint8_t *d, size_t n, int *w, int *h) {
     if (n < 4 || d[0] != 0xFF || d[1] != 0xD8) return false;
@@ -931,45 +910,65 @@ gs_gfx_texture gs_gfx_load_texture(gs_gfx_bytes path, int64_t flags) {
     bool webp = n >= 5 && SDL_strcasecmp(buf + n - 5, ".webp") == 0;
     bool jpeg = (n >= 4 && SDL_strcasecmp(buf + n - 4, ".jpg") == 0) ||
                 (n >= 5 && SDL_strcasecmp(buf + n - 5, ".jpeg") == 0);
-    SDL_Surface *loaded = bmp    ? SDL_LoadBMP(buf)
-                          : webp ? gfx_load_webp(buf)
-                          : jpeg ? gfx_load_jpeg(buf)
-                                 : SDL_LoadPNG(buf);
-    if (!loaded) {
-        gfx_fail("cannot load %s: %s", buf, SDL_GetError());
-        return h;
-    }
-    SDL_Surface *rgba = SDL_ConvertSurface(loaded, SDL_PIXELFORMAT_RGBA32);
-    SDL_DestroySurface(loaded);
-    if (!rgba) {
-        gfx_sdl_fail("converting an image");
-        return h;
+    /* The pixels as tight RGBA rows: a WebP straight from libwebp's decoder, anything else
+       through an SDL surface, converted only when it is not RGBA already. */
+    uint8_t *px = NULL;
+    int w = 0, ht = 0;
+    SDL_Surface *surf = NULL;
+    if (webp) {
+        size_t size = 0;
+        void *file = SDL_LoadFile(buf, &size);
+        bool read = file != NULL;
+        if (read) px = WebPDecodeRGBA((const uint8_t *)file, size, &w, &ht);
+        SDL_free(file);
+        if (!px) {
+            gfx_fail("cannot load %s: %s", buf, read ? "not a WebP image" : SDL_GetError());
+            return h;
+        }
+    } else {
+        surf = bmp ? SDL_LoadBMP(buf) : jpeg ? gfx_load_jpeg(buf) : SDL_LoadPNG(buf);
+        if (!surf) {
+            gfx_fail("cannot load %s: %s", buf, SDL_GetError());
+            return h;
+        }
+        if (surf->format != SDL_PIXELFORMAT_RGBA32) {
+            SDL_Surface *rgba = SDL_ConvertSurface(surf, SDL_PIXELFORMAT_RGBA32);
+            SDL_DestroySurface(surf);
+            surf = rgba;
+            if (!surf) {
+                gfx_sdl_fail("converting an image");
+                return h;
+            }
+        }
+        w = surf->w;
+        ht = surf->h;
+        if (surf->pitch == w * 4) {
+            px = (uint8_t *)surf->pixels;
+        } else {
+            px = (uint8_t *)malloc((size_t)w * 4 * (size_t)ht);
+            for (int y = 0; y < ht; y++)
+                memcpy(px + (size_t)w * 4 * (size_t)y, (uint8_t *)surf->pixels + (size_t)surf->pitch * (size_t)y,
+                       (size_t)w * 4);
+        }
     }
     gs_gfx_texture_desc d;
     SDL_zero(d);
     d.kind = GS_GFX_TEXTURE_2D;
     d.format = (flags & GS_GFX_LOAD_SRGB) ? GS_GFX_RGBA8_SRGB : GS_GFX_RGBA8;
     d.usage = GS_GFX_SAMPLED;
-    d.width = rgba->w;
-    d.height = rgba->h;
+    d.width = w;
+    d.height = ht;
     d.depth = 1;
     d.mips = (flags & GS_GFX_LOAD_MIPS) ? 0 : 1;
     d.samples = 1;
     h = gs_gfx_create_texture(&d);
     gfx_texture_slot *s = (gfx_texture_slot *)gfx_table_find(&gfx.textures, h.id);
     if (s) {
-        /* Rows as the surface has them, which may be padded. */
-        size_t row = (size_t)rgba->w * 4;
-        uint8_t *tight = (uint8_t *)malloc(row * (size_t)rgba->h);
-        for (int y = 0; y < rgba->h; y++)
-            memcpy(tight + row * (size_t)y, (uint8_t *)rgba->pixels + (size_t)rgba->pitch * (size_t)y,
-                   row);
         gs_gfx_region r = { 0 };
         SDL_GPUTextureRegion reg;
         gfx_region(s, &r, &reg, "load_texture");
-        bool ok = gfx_upload_texture(&reg, s->format, tight, (uint32_t)(row * (size_t)rgba->h), true,
+        bool ok = gfx_upload_texture(&reg, s->format, px, (uint32_t)((size_t)w * 4 * (size_t)ht), true,
                                      "load_texture");
-        free(tight);
         if (ok && s->desc.mips > 1) {
             SDL_GPUCommandBuffer *cb = SDL_AcquireGPUCommandBuffer(gfx.dev);
             if (cb) {
@@ -982,7 +981,11 @@ gs_gfx_texture gs_gfx_load_texture(gs_gfx_bytes path, int64_t flags) {
             h.id = 0;
         }
     }
-    SDL_DestroySurface(rgba);
+    if (webp) WebPFree(px);
+    else {
+        if (px != surf->pixels) free(px);
+        SDL_DestroySurface(surf);
+    }
     return h;
 }
 
