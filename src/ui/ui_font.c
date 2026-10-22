@@ -108,7 +108,9 @@ static void ui_release_texture(ui_atlas *a) {
 void ui_free_atlas(ui_atlas *a) {
     ui_release_texture(a);
     for (int i = 0; i < a->nfonts; i++) {
-        free(ui_table_find(&ui_fonts, a->fonts[i]));
+        ui_font *f = (ui_font *)ui_table_find(&ui_fonts, a->fonts[i]);
+        if (f) free(f->kern);
+        free(f);
         ui_table_remove(&ui_fonts, a->fonts[i]);
     }
     ui_table_remove(&ui_atlases, a->id);
@@ -430,6 +432,7 @@ uint8_t gs_ui_bake_font_atlas(gs_ui_font_atlas h, float scale) {
     for (int i = 0; i < a->nfonts; i++) {
         ui_font *f = (ui_font *)ui_table_find(&ui_fonts, a->fonts[i]);
         f->font->handle.height = f->font->info.height / scale;
+        ui_font_kerning(f);
     }
     a->scale = scale;
     a->null_uv = null_tex.uv;

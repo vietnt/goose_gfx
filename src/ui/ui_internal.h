@@ -109,6 +109,7 @@ typedef struct {
 typedef struct {
     struct nk_font *font;
     uint32_t atlas;             /* the atlas's handle */
+    struct ui_kern *kern;       /* its kerning; NULL for none */
 } ui_font;
 
 extern ui_table ui_atlases, ui_fonts;
@@ -120,6 +121,8 @@ bool ui_atlas_in_use(ui_atlas *a);
 void ui_free_atlas(ui_atlas *a);
 /* The handle of the font Nuklear knows by `font`, or 0. */
 gs_ui_font ui_font_handle(const struct nk_user_font *font);
+/* Measures and draws a baked font kerned (ui_nuklear.c). */
+void ui_font_kerning(ui_font *f);
 /* Adds Nuklear's built-in font, one from TrueType bytes or one from a file
    (`data` its path) to an atlas, what goes wrong named after `fn`. */
 enum { UI_FONT_DEFAULT, UI_FONT_MEMORY, UI_FONT_FILE };
