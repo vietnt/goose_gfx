@@ -232,6 +232,7 @@ SDL_GPUCommandBuffer *gfx_cmd(void) {
     if (!gfx.cmd) {
         gfx.cmd = gfx_acquire_cmd();
         if (!gfx.cmd) gfx_sdl_fail("acquiring a command buffer");
+        gfx.cmd_serial++;
         memset(gfx.uniforms_pushed, 0, sizeof gfx.uniforms_pushed);
         for (int i = 0; gfx.cmd && i < gfx.ngroups; i++)
             SDL_PushGPUDebugGroup(gfx.cmd, gfx.groups[i]);

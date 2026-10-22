@@ -220,8 +220,9 @@ uint8_t gs_gfx_update_buffer(gs_gfx_buffer b, int64_t offset, gs_gfx_bytes data)
         return gfx_misuse("update_buffer: %lld bytes at %lld do not fit a buffer of %u",
                           (long long)data.len, (long long)offset, s->size);
     bool whole = offset == 0 && data.len == (int64_t)s->size;
+    if (!gfx_cmd()) return 0;
     return gfx_upload_buffer(s->buf, (uint32_t)offset, data.data, (uint32_t)data.len, 0, false,
-                             whole, "update_buffer");
+                             whole && gfx_cycle_once(&s->cycled_in), "update_buffer");
 }
 
 /* Metal on macOS wants a buffer copy's offsets and size multiples of 4.

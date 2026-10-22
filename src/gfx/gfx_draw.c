@@ -5,6 +5,20 @@
 
 #include "gfx_internal.h"
 
+/* SDL cycles a texture or buffer whenever its current memory is still used
+   by a command buffer, the one being recorded included, and keeps every
+   copy it makes. A target cleared once per frame then gets fresh memory while
+   an earlier frame still reads the old, which is what cycling is for; but a
+   target cleared many times in one frame (a painter's atlas, once per batch)
+   would get a fresh copy each time, kept for good. So a resource cycles only
+   on its first clear or rewrite in each frame command buffer; later ones
+   reuse its memory, which SDL orders after the passes before. */
+bool gfx_cycle_once(uint64_t *cycled_in) {
+    if (*cycled_in == gfx.cmd_serial) return false;
+    *cycled_in = gfx.cmd_serial;
+    return true;
+}
+
 static void gfx_reset_bindings(void) {
     memset(gfx.samplers_bound, 0, sizeof gfx.samplers_bound);
     memset(gfx.textures_bound, 0, sizeof gfx.textures_bound);
@@ -21,6 +35,7 @@ uint8_t gs_gfx_begin_pass(const gs_gfx_pass_desc *d) {
     if (gfx.pass || gfx.cpass)
         return gfx_misuse("begin_pass inside a %s pass: end it first",
                           gfx.pass ? "render" : "compute");
+    if (!gfx_cmd()) return 0;           /* first, so gfx_cycle_once sees this frame's buffer */
     SDL_GPUColorTargetInfo ct[4];
     gfx_targets t;
     SDL_zero(t);
@@ -60,7 +75,7 @@ uint8_t gs_gfx_begin_pass(const gs_gfx_pass_desc *d) {
            contents, SDL may give it fresh memory rather than wait; but
            fresh memory is fresh for every mip and layer, so only where
            the clear is all of the texture. */
-        ct[i].cycle = d->clear_color && gfx_one_subresource(s);
+        ct[i].cycle = d->clear_color && gfx_one_subresource(s) && gfx_cycle_once(&s->cycled_in);
         if (d->resolve[i].id) {
             gfx_texture_slot *r = gfx_texture_slot_of(d->resolve[i]);
             if (!r) return 0;
@@ -110,7 +125,7 @@ uint8_t gs_gfx_begin_pass(const gs_gfx_pass_desc *d) {
         dt.stencil_store_op = SDL_GPU_STOREOP_STORE;
         /* Fresh memory would lose the stencil a pass loads, and other mips. */
         dt.cycle = d->clear_depth && (d->clear_stencil || !gfx_has_stencil(s->format)) &&
-                   gfx_one_subresource(s);
+                   gfx_one_subresource(s) && gfx_cycle_once(&s->cycled_in);
         t.has_depth = true;
         t.depth = s->format;
     }

@@ -44,6 +44,7 @@ void gfx_table_clear(gfx_table *t);
 typedef struct {
     SDL_GPUBuffer *buf;
     uint32_t size, usage;
+    uint64_t cycled_in;         /* the frame command buffer it last cycled in */
 } gfx_buffer_slot;
 
 typedef struct {
@@ -51,6 +52,7 @@ typedef struct {
     gs_gfx_texture_desc desc;   /* as created: mips resolved, formats Goose's */
     SDL_GPUTextureFormat format;
     uint32_t usage;             /* SDL usage flags */
+    uint64_t cycled_in;         /* the frame command buffer it last cycled in */
 } gfx_texture_slot;
 
 typedef struct {
@@ -151,6 +153,7 @@ typedef struct {
 
     /* Recording. Uploads and readbacks use command buffers of their own. */
     SDL_GPUCommandBuffer *cmd;
+    uint64_t cmd_serial;                /* counts frame command buffers, from 1 */
     SDL_GPURenderPass *pass;
     SDL_GPUComputePass *cpass;
     gfx_targets targets;                /* of the render pass */
@@ -261,6 +264,7 @@ void gfx_poll_timing(void);
 
 /* The command buffer being recorded, acquired on first use. */
 SDL_GPUCommandBuffer *gfx_cmd(void);
+bool gfx_cycle_once(uint64_t *cycled_in);
 /* Submits what has been recorded, if anything, without waiting. */
 bool gfx_submit(void);
 /* Misuse unless the debug groups pushed in the pass being ended are popped,
