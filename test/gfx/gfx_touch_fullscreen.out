@@ -1,0 +1,8 @@
+touch screen: false
+mouse move: touch false at 10.0,12.0
+touch down: touch true pressed true at 30.0,40.0
+touch up: touch true released true
+click: touch false pressed true
+fullscreen: false
+set: true now true
+set: true now false

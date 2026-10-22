@@ -183,6 +183,8 @@ typedef struct {
     bool focused;                       /* keyboard focus; true initially headless */
     bool mouse_relative;                /* explicitly released on focus loss */
     bool cursor_visible;                /* preference outside relative mouse mode */
+    bool mouse_touch;                   /* the latest mouse event came from a finger */
+    bool fullscreen;                    /* headless: what set_fullscreen asked for */
     uint8_t button_clicks[32];           /* click count to preserve on focus-loss releases */
     /* The window's size in its own coordinates, which SDL gives the mouse
        in, and in pixels: a high-density display has more of the second. */

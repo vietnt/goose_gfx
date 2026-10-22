@@ -840,8 +840,10 @@ static gs_gfx_event *gfx_event(int32_t kind) {
     return e;
 }
 
-/* The mouse injected input comes from, whose positions are pixels already. */
+/* The mouse injected input comes from, whose positions are pixels already,
+   and the finger injected touches come from, likewise. */
 #define GFX_INJECTED_MOUSE ((SDL_MouseID)-16)
+#define GFX_INJECTED_TOUCH ((SDL_MouseID)-17)
 
 /* The modifier keys down now, from the keys' own state, which injected key
    events keep as real ones do. */
@@ -975,7 +977,8 @@ uint8_t gs_gfx_frame(void) {
                 break;
             case SDL_EVENT_MOUSE_MOTION: {
                 if (!gfx.focused) break;
-                bool injected = e.motion.which == GFX_INJECTED_MOUSE;
+                bool injected = e.motion.which == GFX_INJECTED_MOUSE || e.motion.which == GFX_INJECTED_TOUCH;
+                gfx.mouse_touch = e.motion.which == SDL_TOUCH_MOUSEID || e.motion.which == GFX_INJECTED_TOUCH;
                 int pw = injected ? 1 : gfx.window_pw, w = injected ? 1 : gfx.window_w;
                 int ph = injected ? 1 : gfx.window_ph, h = injected ? 1 : gfx.window_h;
                 gfx.mouse_x = gfx_to_pixels(e.motion.x, pw, w);
@@ -992,7 +995,8 @@ uint8_t gs_gfx_frame(void) {
             case SDL_EVENT_MOUSE_BUTTON_DOWN:
             case SDL_EVENT_MOUSE_BUTTON_UP: {
                 if (!gfx.focused) break;
-                bool injected = e.button.which == GFX_INJECTED_MOUSE;
+                bool injected = e.button.which == GFX_INJECTED_MOUSE || e.button.which == GFX_INJECTED_TOUCH;
+                gfx.mouse_touch = e.button.which == SDL_TOUCH_MOUSEID || e.button.which == GFX_INJECTED_TOUCH;
                 gfx.mouse_x = injected ? e.button.x
                                        : gfx_to_pixels(e.button.x, gfx.window_pw, gfx.window_w);
                 gfx.mouse_y = injected ? e.button.y
@@ -1211,13 +1215,12 @@ uint8_t gs_gfx_inject_key(gs_gfx_bytes name, uint8_t down) {
     return SDL_PushEvent(&e);
 }
 
-void gs_gfx_inject_mouse(float x, float y, int64_t button, uint8_t down) {
-    if (!gfx_need_device("inject_mouse")) return;
+static void gfx_inject_pointer(SDL_MouseID which, float x, float y, int64_t button, uint8_t down) {
     SDL_Event e;
     SDL_zero(e);
     e.type = SDL_EVENT_MOUSE_MOTION;
     e.motion.timestamp = SDL_GetTicksNS();
-    e.motion.which = GFX_INJECTED_MOUSE;
+    e.motion.which = which;
     e.motion.x = x;
     e.motion.y = y;
     e.motion.xrel = x - gfx.mouse_x;
@@ -1228,7 +1231,7 @@ void gs_gfx_inject_mouse(float x, float y, int64_t button, uint8_t down) {
         SDL_zero(e);
         e.type = down ? SDL_EVENT_MOUSE_BUTTON_DOWN : SDL_EVENT_MOUSE_BUTTON_UP;
         e.button.timestamp = SDL_GetTicksNS();
-        e.button.which = GFX_INJECTED_MOUSE;
+        e.button.which = which;
         e.button.button = (Uint8)button;
         e.button.down = down != 0;
         e.button.clicks = 1;
@@ -1236,6 +1239,43 @@ void gs_gfx_inject_mouse(float x, float y, int64_t button, uint8_t down) {
         e.button.y = y;
         SDL_PushEvent(&e);
     }
+}
+
+void gs_gfx_inject_mouse(float x, float y, int64_t button, uint8_t down) {
+    if (!gfx_need_device("inject_mouse")) return;
+    gfx_inject_pointer(GFX_INJECTED_MOUSE, x, y, button, down);
+}
+
+/* A finger going down or up at pixel x, y, as SDL reports a touch: the left
+   button, from a mouse that mouse_touch() says is a finger. */
+void gs_gfx_inject_touch(float x, float y, uint8_t down) {
+    if (!gfx_need_device("inject_touch")) return;
+    gfx_inject_pointer(GFX_INJECTED_TOUCH, x, y, GS_GFX_MOUSE_LEFT, down);
+}
+
+uint8_t gs_gfx_mouse_touch(void) { return gfx.mouse_touch; }
+
+/* A screen touched directly (a phone's or tablet's), not a trackpad. */
+uint8_t gs_gfx_touch_screen(void) {
+    int n = 0;
+    SDL_TouchID *ids = SDL_GetTouchDevices(&n);
+    bool direct = false;
+    for (int i = 0; ids && i < n; ++i)
+        if (SDL_GetTouchDeviceType(ids[i]) == SDL_TOUCH_DEVICE_DIRECT) direct = true;
+    SDL_free(ids);
+    return direct;
+}
+
+uint8_t gs_gfx_set_fullscreen(uint8_t on) {
+    if (!gfx_need_device("set_fullscreen")) return 0;
+    if (gfx.window && !SDL_SetWindowFullscreen(gfx.window, on != 0)) return gfx_sdl_fail("set_fullscreen");
+    gfx.fullscreen = on != 0;
+    return 1;
+}
+
+uint8_t gs_gfx_fullscreen(void) {
+    if (gfx.window) return (SDL_GetWindowFlags(gfx.window) & SDL_WINDOW_FULLSCREEN) != 0;
+    return gfx.fullscreen;
 }
 
 int64_t gs_gfx_events(gs_gfx_event_slice out) {

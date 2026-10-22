@@ -178,6 +178,11 @@ typedef struct {
     X(uint8_t, gs_gfx_inject_focus, (uint8_t focused)) \
     X(uint8_t, gs_gfx_inject_key, (gs_gfx_bytes name, uint8_t down)) \
     X(void, gs_gfx_inject_mouse, (float x, float y, int64_t button, uint8_t down)) \
+    X(uint8_t, gs_gfx_mouse_touch, (void)) \
+    X(uint8_t, gs_gfx_touch_screen, (void)) \
+    X(void, gs_gfx_inject_touch, (float x, float y, uint8_t down)) \
+    X(uint8_t, gs_gfx_set_fullscreen, (uint8_t on)) \
+    X(uint8_t, gs_gfx_fullscreen, (void)) \
     X(int64_t, gs_gfx_events, (gs_gfx_event_slice out)) \
     X(void, gs_gfx_text_input, (uint8_t on)) \
     X(uint8_t, gs_gfx_inject_text, (gs_gfx_bytes text)) \

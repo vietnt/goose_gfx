@@ -586,6 +586,19 @@ extern "gs_gfx_cursor_visible" fn cursor_visible() -> bool;
 // only moves it.
 extern "gs_gfx_inject_key" fn inject_key(name: const u8[:], down: bool) -> bool;
 extern "gs_gfx_inject_mouse" fn inject_mouse(x: f32, y: f32, button: i64, down: bool);
+// A finger touching a touch screen comes as the mouse too (a move, then the
+// left button): mouse_touch says whether the latest mouse event, a move or a
+// button, came from a finger, so a program can tell a touch from a mouse. A
+// test injects one with inject_touch (down, then up). touch_screen says
+// whether the device has a screen touched directly (a phone's or tablet's,
+// not a trackpad), as a page's (pointer: coarse) does.
+extern "gs_gfx_mouse_touch" fn mouse_touch() -> bool;
+extern "gs_gfx_touch_screen" fn touch_screen() -> bool;
+extern "gs_gfx_inject_touch" fn inject_touch(x: f32, y: f32, down: bool);
+// The window filling the screen, or back to its own size; headless, only the
+// state changes. False on failure; error() says why.
+extern "gs_gfx_set_fullscreen" fn set_fullscreen(on: bool) -> bool;
+extern "gs_gfx_fullscreen" fn fullscreen() -> bool;
 // Text as if typed: an EVENT_TEXT per character at the next frame().
 extern "gs_gfx_inject_text" fn inject_text(text: const u8[:]) -> bool;
 // A focus change at the next frame(), in order with other injected input.
