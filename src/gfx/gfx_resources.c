@@ -1,6 +1,7 @@
 /* The gfx layer: buffers, textures and samplers, and moving data between
    them and the program. */
 
+#include "webp/decode.h"
 #include "gfx_internal.h"
 
 #include <stdlib.h>
@@ -854,6 +855,27 @@ uint8_t gs_gfx_save_png(gs_gfx_texture t, gs_gfx_bytes path) {
     return ok;
 }
 
+// A WebP file as an RGBA surface, or NULL with SDL's error set.
+static SDL_Surface *gfx_load_webp(const char *path) {
+    size_t size = 0;
+    void *file = SDL_LoadFile(path, &size);
+    if (!file) return NULL;
+    int w = 0, h = 0;
+    uint8_t *px = WebPDecodeRGBA((const uint8_t *)file, size, &w, &h);
+    SDL_free(file);
+    if (!px) {
+        SDL_SetError("not a WebP image");
+        return NULL;
+    }
+    SDL_Surface *s = SDL_CreateSurface(w, h, SDL_PIXELFORMAT_RGBA32);
+    if (s)
+        for (int y = 0; y < h; y++)
+            memcpy((uint8_t *)s->pixels + (size_t)s->pitch * (size_t)y, px + (size_t)w * 4 * (size_t)y,
+                   (size_t)w * 4);
+    WebPFree(px);
+    return s;
+}
+
 gs_gfx_texture gs_gfx_load_texture(gs_gfx_bytes path, int64_t flags) {
     gs_gfx_texture h = { 0 };
     if (!gfx_need_device("load_texture")) return h;
@@ -863,7 +885,8 @@ gs_gfx_texture gs_gfx_load_texture(gs_gfx_bytes path, int64_t flags) {
     if (n) memcpy(buf, path.data, n);
     buf[n] = 0;
     bool bmp = n >= 4 && SDL_strcasecmp(buf + n - 4, ".bmp") == 0;
-    SDL_Surface *loaded = bmp ? SDL_LoadBMP(buf) : SDL_LoadPNG(buf);
+    bool webp = n >= 5 && SDL_strcasecmp(buf + n - 5, ".webp") == 0;
+    SDL_Surface *loaded = bmp ? SDL_LoadBMP(buf) : webp ? gfx_load_webp(buf) : SDL_LoadPNG(buf);
     if (!loaded) {
         gfx_fail("cannot load %s: %s", buf, SDL_GetError());
         return h;

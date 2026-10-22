@@ -7,3 +7,6 @@
 	path = third_party/nuklear
 	url = https://github.com/Immediate-Mode-UI/Nuklear
 	shallow = true
+[submodule "third_party/libwebp"]
+	path = third_party/libwebp
+	url = https://github.com/webmproject/libwebp

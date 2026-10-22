@@ -10,10 +10,10 @@
 cmake_minimum_required(VERSION 3.20)
 project(goose_gfx_package C)
 
-# SDL3 and Nuklear: the submodules beside this file, or the Goose tree's own
-# while the package lives in that tree. Without either the package builds
-# nothing, and says so.
-foreach(dep IN ITEMS SDL nuklear)
+# SDL3, Nuklear and libwebp: the submodules beside this file, or the Goose
+# tree's own while the package lives in that tree. Without any of them the
+# package builds nothing, and says so.
+foreach(dep IN ITEMS SDL nuklear libwebp)
     set(GOOSE_GFX_${dep} "" CACHE PATH "The ${dep} source tree")
     if(NOT GOOSE_GFX_${dep})
         foreach(cand "${CMAKE_CURRENT_SOURCE_DIR}/third_party/${dep}"
@@ -64,6 +64,13 @@ set(SDL_OPENGL OFF CACHE BOOL "" FORCE)
 set(SDL_OPENGLES OFF CACHE BOOL "" FORCE)
 add_subdirectory("${GOOSE_GFX_SDL}" SDL EXCLUDE_FROM_ALL)
 
+# --- libwebp: its decoder only, for load_texture ----------------------------
+foreach(opt IN ITEMS ANIM_UTILS CWEBP DWEBP GIF2WEBP IMG2WEBP VWEBP WEBPINFO LIBWEBPMUX WEBPMUX EXTRAS)
+    set(WEBP_BUILD_${opt} OFF CACHE BOOL "" FORCE)
+endforeach()
+set(WEBP_USE_THREAD OFF CACHE BOOL "" FORCE)
+add_subdirectory("${GOOSE_GFX_libwebp}" libwebp EXCLUDE_FROM_ALL)
+
 # --- the gfx layer -----------------------------------------------------------
 add_library(goose_gfx STATIC
     src/gfx/gfx_api.h
@@ -74,9 +81,10 @@ add_library(goose_gfx STATIC
     src/gfx/gfx_pipeline.c
     src/gfx/gfx_draw.c
 )
-target_link_libraries(goose_gfx PUBLIC SDL3::SDL3-static)
+target_link_libraries(goose_gfx PUBLIC SDL3::SDL3-static webpdecoder)
 # The Vulkan headers SDL carries, for the feature structs SDL_GPUVulkanOptions takes.
 target_include_directories(goose_gfx PRIVATE "${GOOSE_GFX_SDL}/src/video/khronos")
+target_include_directories(goose_gfx PRIVATE "${GOOSE_GFX_libwebp}/src")
 
 # --- the audio layer: the PCM mixer, no window ---------------------------------
 add_library(goose_audio STATIC src/audio/audio.c src/audio/audio_api.h src/audio/dr_mp3_impl.c)
