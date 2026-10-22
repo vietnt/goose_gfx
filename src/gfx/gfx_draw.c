@@ -75,7 +75,8 @@ uint8_t gs_gfx_begin_pass(const gs_gfx_pass_desc *d) {
            contents, SDL may give it fresh memory rather than wait; but
            fresh memory is fresh for every mip and layer, so only where
            the clear is all of the texture. */
-        ct[i].cycle = d->clear_color && gfx_one_subresource(s) && gfx_cycle_once(&s->cycled_in);
+        ct[i].cycle = d->clear_color && !s->no_cycle && gfx_one_subresource(s) &&
+                      gfx_cycle_once(&s->cycled_in);
         if (d->resolve[i].id) {
             gfx_texture_slot *r = gfx_texture_slot_of(d->resolve[i]);
             if (!r) return 0;
@@ -125,7 +126,7 @@ uint8_t gs_gfx_begin_pass(const gs_gfx_pass_desc *d) {
         dt.stencil_store_op = SDL_GPU_STOREOP_STORE;
         /* Fresh memory would lose the stencil a pass loads, and other mips. */
         dt.cycle = d->clear_depth && (d->clear_stencil || !gfx_has_stencil(s->format)) &&
-                   gfx_one_subresource(s) && gfx_cycle_once(&s->cycled_in);
+                   !s->no_cycle && gfx_one_subresource(s) && gfx_cycle_once(&s->cycled_in);
         t.has_depth = true;
         t.depth = s->format;
     }

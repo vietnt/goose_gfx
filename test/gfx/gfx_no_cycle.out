@@ -1,0 +1,6 @@
+frame 0: screen 0,0,255 32,223,0; depth 0.125 0.125
+frame 1: screen 0,0,255 64,191,0; depth 0.25 0.25
+frame 2: screen 0,0,255 96,159,0; depth 0.375 0.375
+frame 3: screen 0,0,255 128,128,0; depth 0.5 0.5
+frame 4: screen 0,0,255 159,96,0; depth 0.625 0.625
+frame 5: screen 0,0,255 191,64,0; depth 0.75 0.75

@@ -218,6 +218,7 @@ typedef struct {
     X(uint8_t, gs_gfx_texture_info, (gs_gfx_texture t, gs_gfx_texture_desc *out)) \
     X(void, gs_gfx_release_texture, (gs_gfx_texture t)) \
     X(void, gs_gfx_set_texture_name, (gs_gfx_texture t, gs_gfx_bytes name)) \
+    X(void, gs_gfx_set_texture_cycle, (gs_gfx_texture t, uint8_t on)) \
     X(gs_gfx_sampler, gs_gfx_create_sampler, (const gs_gfx_sampler_desc *desc)) \
     X(void, gs_gfx_release_sampler, (gs_gfx_sampler s)) \
     /* Pipelines. */ \

@@ -309,6 +309,11 @@ void gs_gfx_set_texture_name(gs_gfx_texture t, gs_gfx_bytes name) {
     SDL_SetGPUTextureName(gfx.dev, s->tex, gfx_cstr(name, buf, sizeof buf));
 }
 
+void gs_gfx_set_texture_cycle(gs_gfx_texture t, uint8_t on) {
+    gfx_texture_slot *s = gfx_texture_slot_of(t);
+    if (s) s->no_cycle = !on;
+}
+
 void gs_gfx_set_buffer_name(gs_gfx_buffer b, gs_gfx_bytes name) {
     gfx_buffer_slot *s = gfx_buffer_slot_of(b);
     if (!s) return;

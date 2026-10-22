@@ -959,6 +959,11 @@ fn texture_info(t: Texture) -> TextureDesc {
 }
 extern "gs_gfx_release_texture" fn release(t: Texture);
 extern "gs_gfx_set_texture_name" fn set_name(t: Texture, name: const u8[:]);
+// Whether a pass that clears the whole of t may give it fresh memory while an
+// earlier frame on the GPU still reads it (on by default, the screen's too).
+// SDL keeps every copy, up to three for a target cleared each frame; off, t
+// keeps one, and its clear waits on the GPU for those reads instead.
+extern "gs_gfx_set_texture_cycle" fn set_cycle(t: Texture, on: bool);
 
 // The bytes one texel of an uncompressed `format` takes as it is read back:
 // 4 for every depth format, read as f32. region_size counts compressed ones.

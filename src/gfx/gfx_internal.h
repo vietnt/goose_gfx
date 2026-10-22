@@ -53,6 +53,7 @@ typedef struct {
     SDL_GPUTextureFormat format;
     uint32_t usage;             /* SDL usage flags */
     uint64_t cycled_in;         /* the frame command buffer it last cycled in */
+    bool no_cycle;              /* set_cycle(t, false): its clears keep its memory */
 } gfx_texture_slot;
 
 typedef struct {
