@@ -73,6 +73,14 @@ extern "gs_audio_playing" fn playing(voice: Voice) -> bool;
 extern "gs_audio_stop" fn stop(voice: Voice);
 extern "gs_audio_stop_all" fn stop_all();
 
+// Paused, every voice holds where it is and the output is silent; playing
+// again goes on from there. Voices started while paused wait too.
+extern "gs_audio_set_paused" fn set_paused(paused: bool);
+extern "gs_audio_paused" fn paused() -> bool;
+// The master volume, 0..1 (1 when opened), over every voice: 0 mutes while
+// the voices go on. False, with an error, for a volume out of range.
+extern "gs_audio_set_volume" fn set_volume(volume: f32) -> bool;
+extern "gs_audio_volume" fn volume() -> f32;
 // Update without restarting. A completed voice returns false with an error.
 extern "gs_audio_set_voice" fn set_voice(voice: Voice, volume: f32,
                                          pan: f32, pitch: f32) -> bool;

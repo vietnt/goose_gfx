@@ -30,6 +30,8 @@ typedef struct {
 
 static struct {
     bool open, offline;
+    bool paused;   /* every voice held where it is; the output silent */
+    float volume;  /* the master volume, applied after the voices are mixed */
     int rate;
     SDL_AudioStream *stream;
     audio_sound sounds[AUDIO_SOUNDS];
@@ -85,6 +87,7 @@ static audio_voice *audio_find_voice(gs_audio_voice handle) {
 /* Called under the stream lock, or synchronously in offline mode. */
 static void audio_mix(float *out, int64_t frames) {
     memset(out, 0, (size_t)frames * 2 * sizeof(float));
+    if (audio.paused) return;
     for (int v = 0; v < AUDIO_VOICES; ++v) {
         audio_voice *voice = &audio.voices[v];
         if (!voice->id) continue;
@@ -112,6 +115,7 @@ static void audio_mix(float *out, int64_t frames) {
         }
     }
     for (int64_t i = 0; i < frames * 2; ++i) {
+        out[i] *= audio.volume;
         if (out[i] > 1) out[i] = 1;
         if (out[i] < -1) out[i] = -1;
     }
@@ -148,6 +152,8 @@ uint8_t gs_audio_open(int64_t sample_rate, uint8_t offline) {
     if (!audio_rate(sample_rate)) return audio_fail("sample rate must be 8000..192000 Hz");
     audio.rate = (int)sample_rate;
     audio.offline = offline != 0;
+    audio.paused = false;
+    audio.volume = 1;
     if (offline) { audio.open = true; return 1; }
     if (!SDL_InitSubSystem(SDL_INIT_AUDIO)) return audio_sdl_fail();
     SDL_AudioSpec spec = { SDL_AUDIO_F32, 2, (int)sample_rate };
@@ -348,6 +354,24 @@ void gs_audio_stop_all(void) {
     memset(audio.voices, 0, sizeof audio.voices);
     audio_unlock();
 }
+
+void gs_audio_set_paused(uint8_t paused) {
+    audio_lock();
+    audio.paused = paused != 0;
+    audio_unlock();
+}
+
+uint8_t gs_audio_paused(void) { return audio.paused; }
+
+uint8_t gs_audio_set_volume(float volume) {
+    if (!(volume >= 0 && volume <= 1)) return audio_fail("volume must be 0..1");
+    audio_lock();
+    audio.volume = volume;
+    audio_unlock();
+    return 1;
+}
+
+float gs_audio_volume(void) { return audio.open ? audio.volume : 1; }
 
 uint8_t gs_audio_set_voice(gs_audio_voice voice, float volume, float pan, float pitch) {
     audio_lock();

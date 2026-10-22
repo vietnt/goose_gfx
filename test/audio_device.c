@@ -32,6 +32,25 @@ int main(void) {
     CHECK(pair[0] == 0.5f && pair[1] == 0.5f);
     gs_audio_close();
 
+    // Paused, a voice holds its place and the output is silent; the master volume scales it.
+    CHECK(gs_audio_open(48000, 1));
+    float ramp[4] = { 0.125f, 0.25f, 0.375f, 0.5f }, two[2];
+    gs_audio_sound steps = gs_audio_create_sound((gs_audio_f32_slice){ ramp, 4 }, 48000, 1);
+    CHECK(steps.id && gs_audio_volume() == 1 && !gs_audio_paused());
+    CHECK(gs_audio_play(steps, 1, 0, 1, 0).id);
+    CHECK(gs_audio_render((gs_audio_f32_slice){ two, 2 }) && two[0] == 0.125f);
+    gs_audio_set_paused(1);
+    CHECK(gs_audio_paused());
+    CHECK(gs_audio_render((gs_audio_f32_slice){ two, 2 }) && two[0] == 0 && two[1] == 0);
+    gs_audio_set_paused(0);
+    CHECK(gs_audio_render((gs_audio_f32_slice){ two, 2 }) && two[0] == 0.25f);
+    CHECK(gs_audio_set_volume(0.5f) && gs_audio_volume() == 0.5f);
+    CHECK(gs_audio_render((gs_audio_f32_slice){ two, 2 }) && two[0] == 0.1875f);
+    CHECK(!gs_audio_set_volume(1.5f) && gs_audio_volume() == 0.5f);
+    gs_audio_close();
+    CHECK(gs_audio_open(48000, 1) && gs_audio_volume() == 1);
+    gs_audio_close();
+
     CHECK(SDL_SetHint(SDL_HINT_AUDIO_DRIVER, "goose-nonexistent-driver"));
     CHECK(!gs_audio_open(48000, 0));
     CHECK(SDL_SetHint(SDL_HINT_AUDIO_DRIVER, "dummy"));
