@@ -199,5 +199,15 @@ fn main() {
     raw_read("bc7 layer 1", layers, gfx::Region { layer: 1 }, bc7_layer1);
     raw_read("bc2", bc2_tex, gfx::Region {}, bc2);
     raw_read("bc6h", bc6h_s, gfx::Region {}, bc6h);
+
+    // format_supported says what texture() then makes, for formats a device
+    // may lack: ASTC on most desktop GPUs, BC on most phones.
+    let probes: i32[3] = [gfx::BC7, gfx::ASTC_4x4, gfx::ASTC_4x4_SRGB];
+    for i in 3 {
+        let t = gfx::texture(gfx::TextureDesc { format: probes[i], width: 4, height: 4 });
+        print("format_supported(", probes[i], ") agrees with texture(): ",
+              gfx::format_supported(probes[i], gfx::SAMPLED as i64) == (t.id != 0));
+        if t.id != 0 { gfx::release(t); }
+    }
     gfx::close();
 }

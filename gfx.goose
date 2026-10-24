@@ -144,6 +144,11 @@ let BC3_SRGB: i32 = 32;
 let BC7_SRGB: i32 = 33;
 let BC6H_UFLOAT: i32 = 34;
 let BC6H_FLOAT: i32 = 35;
+// ASTC 4 x 4, RGBA in 16 bytes a block, and its _SRGB form, as the BC
+// formats: SAMPLED only, moved as blocks. Most phones and tablets and Apple
+// GPUs have it; most desktop GPUs have BC instead. format_supported says.
+let ASTC_4x4: i32 = 38;
+let ASTC_4x4_SRGB: i32 = 39;
 
 // Samplers.
 let NEAREST: i32 = 0;
@@ -964,6 +969,9 @@ extern "gs_gfx_set_texture_name" fn set_name(t: Texture, name: const u8[:]);
 // SDL keeps every copy, up to three for a target cleared each frame; off, t
 // keeps one, and its clear waits on the GPU for those reads instead.
 extern "gs_gfx_set_texture_cycle" fn set_cycle(t: Texture, on: bool);
+// Whether the device has 2D textures of `format` with `usage`, to choose a
+// format, as a compressed one, before creating a texture of it.
+extern "gs_gfx_texture_format_supported" fn format_supported(format: i32, usage: i64) -> bool;
 
 // The bytes one texel of an uncompressed `format` takes as it is read back:
 // 4 for every depth format, read as f32. region_size counts compressed ones.

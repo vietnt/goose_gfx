@@ -84,6 +84,8 @@ bool gfx_texture_format(int32_t format, SDL_GPUTextureFormat *out) {
         case GS_GFX_BC7_SRGB: *out = SDL_GPU_TEXTUREFORMAT_BC7_RGBA_UNORM_SRGB; return true;
         case GS_GFX_BC6H_UFLOAT: *out = SDL_GPU_TEXTUREFORMAT_BC6H_RGB_UFLOAT; return true;
         case GS_GFX_BC6H_FLOAT: *out = SDL_GPU_TEXTUREFORMAT_BC6H_RGB_FLOAT; return true;
+        case GS_GFX_ASTC_4x4: *out = SDL_GPU_TEXTUREFORMAT_ASTC_4x4_UNORM; return true;
+        case GS_GFX_ASTC_4x4_SRGB: *out = SDL_GPU_TEXTUREFORMAT_ASTC_4x4_UNORM_SRGB; return true;
         case GS_GFX_DEPTH:
             /* 32-bit float where it can be sampled too, as for a shadow map. */
             *out = gfx.dev && SDL_GPUTextureSupportsFormat(
@@ -96,6 +98,16 @@ bool gfx_texture_format(int32_t format, SDL_GPUTextureFormat *out) {
         default:
             return false;
     }
+}
+
+/* Whether the device has 2D textures of a format with a usage: for a
+   program choosing among formats, as among compressed ones, before it
+   creates one. */
+uint8_t gs_gfx_texture_format_supported(int32_t format, int64_t usage) {
+    SDL_GPUTextureFormat f;
+    if (!gfx.dev || !gfx_texture_format(format, &f) || !usage || (usage & ~127)) return 0;
+    return SDL_GPUTextureSupportsFormat(gfx.dev, f, SDL_GPU_TEXTURETYPE_2D,
+                                        (SDL_GPUTextureUsageFlags)usage);
 }
 
 static bool gfx_is_depth(SDL_GPUTextureFormat f) {
@@ -120,6 +132,8 @@ static uint32_t gfx_block(SDL_GPUTextureFormat f) {
         case SDL_GPU_TEXTUREFORMAT_BC7_RGBA_UNORM_SRGB:
         case SDL_GPU_TEXTUREFORMAT_BC6H_RGB_UFLOAT:
         case SDL_GPU_TEXTUREFORMAT_BC6H_RGB_FLOAT:
+        case SDL_GPU_TEXTUREFORMAT_ASTC_4x4_UNORM:
+        case SDL_GPU_TEXTUREFORMAT_ASTC_4x4_UNORM_SRGB:
             return 4;
         default:
             return 1;

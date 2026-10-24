@@ -98,3 +98,6 @@ raw: bc7 edge block refused: read_texture: compressed textures cannot be read ba
 raw: bc7 layer 1 refused: read_texture: compressed textures cannot be read back on Direct3D 12 with SDL 3.4 (its download overruns); upload and sampling work
 raw: bc2 refused: read_texture: compressed textures cannot be read back on Direct3D 12 with SDL 3.4 (its download overruns); upload and sampling work
 raw: bc6h refused: read_texture: compressed textures cannot be read back on Direct3D 12 with SDL 3.4 (its download overruns); upload and sampling work
+format_supported(25) agrees with texture(): true
+format_supported(38) agrees with texture(): true
+format_supported(39) agrees with texture(): true

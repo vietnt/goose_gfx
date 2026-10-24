@@ -98,3 +98,6 @@ raw: bc7 edge block as written true
 raw: bc7 layer 1 as written true
 raw: bc2 as written true
 raw: bc6h as written true
+format_supported(25) agrees with texture(): true
+format_supported(38) agrees with texture(): true
+format_supported(39) agrees with texture(): true
