@@ -264,7 +264,37 @@ static void *audio_malloc(size_t n, void *user) { (void)user; return malloc(n); 
 static void *audio_realloc(void *p, size_t n, void *user) { (void)user; return realloc(p, n); }
 static void audio_free(void *p, void *user) { (void)user; free(p); }
 
+/* Web Audio's BiquadFilter, type lowpass, at cut Hz with Q in dB (alpha = sin w0 / (2 * 10^(Q / 20))),
+   run over each channel of interleaved pcm once, in doubles, from the first frame. A cut at or past
+   Nyquist leaves pcm as it is, as Web Audio's lowpass passes everything there. */
+static void audio_lowpass(float *pcm, int64_t frames, int channels, int rate, double cut, double q) {
+    const double pi = 3.14159265358979323846;
+    double w0 = 2.0 * pi * cut / (double)rate;
+    if (!(w0 < pi)) return;
+    double al = sin(w0) / (2.0 * pow(10.0, q / 20.0));
+    double cw = cos(w0);
+    double a0 = 1.0 + al;
+    double b0 = (1.0 - cw) / 2.0 / a0;
+    double b1 = (1.0 - cw) / a0;
+    double a1 = -2.0 * cw / a0;
+    double a2 = (1.0 - al) / a0;
+    int64_t n = frames * channels;
+    for (int c = 0; c < channels; ++c) {
+        double x1 = 0, x2 = 0, y1 = 0, y2 = 0;
+        for (int64_t i = c; i < n; i += channels) {
+            double x0 = pcm[i];
+            double y0 = b0 * x0 + b1 * x1 + b0 * x2 - a1 * y1 - a2 * y2;
+            x2 = x1; x1 = x0; y2 = y1; y1 = y0;
+            pcm[i] = (float)y0;
+        }
+    }
+}
+
 gs_audio_sound gs_audio_load_sound(gs_audio_bytes path, double from, double to) {
+    return gs_audio_load_sound_lowpass(path, from, to, 0, 0);
+}
+
+gs_audio_sound gs_audio_load_sound_lowpass(gs_audio_bytes path, double from, double to, double cut, double q) {
     gs_audio_sound result = { 0 };
     if (!audio_is_open()) return result;
     char name[1024];
@@ -288,6 +318,7 @@ gs_audio_sound gs_audio_load_sound(gs_audio_bytes path, double from, double to) 
         audio_failf("cannot play", name, "not mono or stereo at 8000..192000 Hz");
         return result;
     }
+    if (cut > 0) audio_lowpass(pcm, (int64_t)frames, channels, rate, cut, q);
     int64_t first = from > 0 ? (int64_t)(from * rate) : 0;
     int64_t end = to > 0 ? (int64_t)(to * rate) : (int64_t)frames;
     if (end > (int64_t)frames) end = (int64_t)frames;

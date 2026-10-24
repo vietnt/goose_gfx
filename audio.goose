@@ -50,6 +50,14 @@ extern "gs_audio_load_sound" fn load_sound_raw(path: const u8[:], from: f64, to:
 fn load_sound(path: const u8[:], from: f64 = 0.0, to: f64 = 0.0) -> Sound {
     load_sound_raw(path, from, to)
 }
+// load_sound through a lowpass at cut Hz with Q in dB, as Web Audio's BiquadFilter (type
+// lowpass) filters it: run over the whole file from its start, in the native layer, before the
+// samples are cut to from .. to and kept in [-1, 1]. cut at or past the file's Nyquist rate passes
+// it unfiltered.
+extern "gs_audio_load_sound_lowpass" fn load_sound_lowpass_raw(path: const u8[:], from: f64, to: f64, cut: f64, q: f64) -> Sound;
+fn load_sound_lowpass(path: const u8[:], cut: f64, q: f64 = 0.7, from: f64 = 0.0, to: f64 = 0.0) -> Sound {
+    load_sound_lowpass_raw(path, from, to, cut, q)
+}
 
 // Stops every voice using the sound, then frees its samples. Zero is harmless;
 // a stale nonzero handle returns false with an error.

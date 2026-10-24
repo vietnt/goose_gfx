@@ -2,7 +2,9 @@
 
 `audio.goose` exposes a small sound-effects API. It owns no PCM in Goose:
 `create_sound` validates and copies a slice to the native layer, which keeps it
-until `release_sound` or `close`. Releasing a sound stops every voice referring
+until `release_sound` or `close`. `load_sound` decodes an MP3 there, and
+`load_sound_lowpass` decodes it and runs Web Audio's lowpass BiquadFilter over
+it (cut Hz, Q in dB) there too, so a filtered sound never passes through Goose. Releasing a sound stops every voice referring
 to it. This makes source-array lifetimes independent of asynchronous playback.
 
 The implementation is `src/audio/audio.c`; `audio_api.h` is its packed extern
