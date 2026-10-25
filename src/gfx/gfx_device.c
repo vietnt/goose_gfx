@@ -963,6 +963,17 @@ int64_t gs_gfx_frames_in_flight(void) { return gfx.frames_in_flight; }
 static void gfx_nothing(void *unused) { (void)unused; }
 #endif
 
+/* The display link paused or running again; nothing where there is none. */
+static void gfx_link_pause(bool paused) {
+#if defined(SDL_PLATFORM_IOS) || defined(SDL_PLATFORM_TVOS)
+    if (gfx.link_paused == paused || !gfx.window) return;
+    gfx.link_paused = paused;
+    SDL_SetHint(SDL_HINT_IOS_DISPLAY_LINK_PAUSED, paused ? "1" : "0");
+#else
+    (void)paused;
+#endif
+}
+
 /* Until an event comes or `seconds` pass. UIKit has no wait of its own in
    SDL, whose fallback polls every millisecond, so there the main run loop
    runs until a source fires (a touch, a block on the main queue such as
@@ -970,6 +981,7 @@ static void gfx_nothing(void *unused) { (void)unused; }
 static void gfx_wait(double seconds) {
     Uint64 until = SDL_GetTicksNS() + (Uint64)(seconds * 1e9);
 #if defined(SDL_PLATFORM_IOS) || defined(SDL_PLATFORM_TVOS)
+    gfx_link_pause(true);
     SDL_PumpEvents();
     while (!SDL_HasEvents(SDL_EVENT_FIRST, SDL_EVENT_LAST)) {
         Uint64 now = SDL_GetTicksNS();
@@ -977,6 +989,9 @@ static void gfx_wait(double seconds) {
         CFRunLoopRunInMode(kCFRunLoopDefaultMode, (double)(until - now) / 1e9, true);
         SDL_PumpEvents();
     }
+    /* a touch, a wake() or the window: the display back at its full rate
+       before the frame they may start */
+    if (SDL_HasEvents(SDL_EVENT_FIRST, SDL_EVENT_LAST)) gfx_link_pause(false);
 #else
     Uint64 now = SDL_GetTicksNS();
     if (now < until) SDL_WaitEventTimeout(NULL, (Sint32)SDL_min((until - now + 999999) / 1000000, 0x7fffffff));
@@ -1005,6 +1020,7 @@ static uint8_t gfx_frame_end(const char *name, bool held, double wait) {
         return 0;
     }
     /* The first call starts the first frame; every later one ends one. */
+    if (!held) gfx_link_pause(false);
     if (gfx.window && gfx.frames > 0 && (!held || gfx.must_show)) {
         gfx_present();
         gfx.must_show = false;

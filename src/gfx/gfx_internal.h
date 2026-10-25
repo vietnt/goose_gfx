@@ -204,6 +204,10 @@ typedef struct {
     /* The window lost what it showed (exposed, shown, restored): the next
        frame_held() shows the screen again rather than nothing. */
     bool must_show;
+    /* iOS: the window's display link paused while a held frame waits
+       (SDL_HINT_IOS_DISPLAY_LINK_PAUSED), so a still screen neither keeps
+       the display at its full rate nor wakes the main thread each refresh. */
+    bool link_paused;
     /* The clipboard without a window: no one else is at it. */
     char *clipboard;
 

@@ -186,7 +186,12 @@ fields in the same order, and the same constant values.
   download's progress, an answer from the system). SDL has no wait of its
   own on UIKit (its fallback polls every millisecond), so there the wait
   runs the main run loop until a source fires; elsewhere it is
-  `SDL_WaitEventTimeout`. Headless it does not wait (`gfx_held`;
+  `SDL_WaitEventTimeout`. On a display faster than 60 Hz SDL's UIKit window
+  keeps a display link that asks for the full rate and wakes the main thread
+  at every refresh; a held frame's wait pauses it (our SDL fork's
+  `SDL_HINT_IOS_DISPLAY_LINK_PAUSED`), and an event ending the wait or the
+  next shown frame runs it again, so moving pages keep 120 Hz and a still
+  one lets the display slow down. Headless it does not wait (`gfx_held`;
   `test/window/gfx_held.goose` checks the wait and wake()).
 * **At most two frames are on the GPU.** `frame()` submits each frame with
   a fence and, with two earlier ones still running, waits for the older
