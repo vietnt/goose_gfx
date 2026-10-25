@@ -1006,6 +1006,11 @@ fn pipeline(vs: const u8[:], fs: const u8[:], desc: PipelineDesc) -> Pipeline {
 }
 fn pipeline(vs: const u8[:], fs: const u8[:]) -> Pipeline { pipeline(vs, fs, PipelineDesc {}) }
 extern "gs_gfx_release_pipeline" fn release(p: Pipeline);
+// A pipeline is built for the targets of each pass it is bound in, the first
+// time it is bound there: tens of ms each on a driver that has not cached it.
+// prepare builds it now for a single-sample pass into one target of `color`
+// (0: none) and a depth target of `depth` (0: none), as at startup.
+extern "gs_gfx_prepare_pipeline" fn prepare(p: Pipeline, color: i32, depth: i32) -> bool;
 extern "gs_gfx_create_compute_pipeline" fn compute_pipeline(cs: const u8[:]) -> ComputePipeline;
 extern "gs_gfx_release_compute_pipeline" fn release(p: ComputePipeline);
 

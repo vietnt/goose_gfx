@@ -487,6 +487,30 @@ void gs_gfx_release_pipeline(gs_gfx_pipeline p) {
     gfx_table_remove(&gfx.pipelines, p.id);
 }
 
+/* The variant a single-sample pass with these targets will bind, built now:
+   the driver compiles it here and not in the first frame that draws with it.
+   The targets as begin_pass records them, so that pass finds this one. */
+uint8_t gs_gfx_prepare_pipeline(gs_gfx_pipeline p, int32_t color, int32_t depth) {
+    if (!gfx_need_device("prepare")) return 0;
+    gfx_pipeline_slot *s = (gfx_pipeline_slot *)gfx_table_get(&gfx.pipelines, p.id);
+    if (!s) return 0;
+    gfx_targets t;
+    SDL_zero(t);
+    t.samples = SDL_GPU_SAMPLECOUNT_1;
+    if (color) {
+        if (!gfx_texture_format(color, &t.color[0]))
+            return gfx_misuse("prepare: a color format that is not one of gfx's constants");
+        t.ncolor = 1;
+    }
+    if (depth) {
+        if (!gfx_texture_format(depth, &t.depth))
+            return gfx_misuse("prepare: a depth format that is not one of gfx's constants");
+        t.has_depth = true;
+    }
+    if (!t.ncolor && !t.has_depth) return gfx_misuse("prepare with no targets");
+    return gfx_pipeline_for(s, &t) != NULL;
+}
+
 /* --- compute pipelines ------------------------------------------------------- */
 
 gs_gfx_compute_pipeline gs_gfx_create_compute_pipeline(gs_gfx_bytes cs) {

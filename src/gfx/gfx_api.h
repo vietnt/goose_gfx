@@ -225,6 +225,7 @@ typedef struct {
     /* Pipelines. */ \
     X(gs_gfx_pipeline, gs_gfx_create_pipeline, (gs_gfx_bytes vs, gs_gfx_bytes fs, const gs_gfx_pipeline_desc *desc)) \
     X(void, gs_gfx_release_pipeline, (gs_gfx_pipeline p)) \
+    X(uint8_t, gs_gfx_prepare_pipeline, (gs_gfx_pipeline p, int32_t color, int32_t depth)) \
     X(gs_gfx_compute_pipeline, gs_gfx_create_compute_pipeline, (gs_gfx_bytes cs)) \
     X(void, gs_gfx_release_compute_pipeline, (gs_gfx_compute_pipeline p)) \
     /* Render passes and drawing. */ \

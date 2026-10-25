@@ -1912,6 +1912,13 @@ fn upload_atlases() {
     }
 }
 
+// Builds the renderer's pipeline for targets of `format` now (gfx::prepare),
+// not in the first frame render() draws into one.
+fn prepare(format: i32) -> bool {
+    if renderer.opened != gfx::open_count() { make_renderer(); }
+    gfx::prepare(renderer.pipeline, format, 0)
+}
+
 // Draws the context's frame over `target`, a gfx texture of COLOR_TARGET
 // usage, with alpha blending; not inside a pass. The frame's windows must
 // have ended.
