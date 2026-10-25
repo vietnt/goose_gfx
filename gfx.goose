@@ -482,6 +482,24 @@ fn frame() -> bool {
     check();
     running
 }
+// Ends a frame that drew nothing new, as frame() does but showing nothing:
+// the window keeps the picture it shows (shown again only where the window
+// lost it: exposed, shown or restored), only commands recorded since the
+// last frame are submitted, and with a window it first waits up to `wait`
+// seconds for an event (input, the window changing, wake()). For a program
+// whose screen is still: no blit, no present, no wake-ups but the ones it
+// asks for. The screen keeps its pixels, so the next frame() may draw only
+// what changed. Headless it does not wait.
+extern "gs_gfx_frame_held" fn frame_held_raw(wait: f64) -> bool;
+fn frame_held(wait: f64) -> bool {
+    let running = frame_held_raw(wait);
+    check();
+    running
+}
+// Ends frame_held()'s wait now, from any thread (a download's progress, an
+// answer from the system). One that comes between frames is kept for the
+// next frame() or frame_held(), which then does not wait.
+extern "gs_gfx_wake" fn wake();
 extern "gs_gfx_quit" fn quit();
 // Submits everything drawn so far and waits until the GPU has done it.
 extern "gs_gfx_flush" fn flush_raw();

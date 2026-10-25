@@ -147,6 +147,8 @@ typedef struct {
     X(int64_t, gs_gfx_present_mode, (void)) \
     X(uint8_t, gs_gfx_gpu_memory, (gs_gfx_memory_info *out)) \
     X(uint8_t, gs_gfx_frame, (void)) \
+    X(uint8_t, gs_gfx_frame_held, (double wait)) \
+    X(void, gs_gfx_wake, (void)) \
     X(void, gs_gfx_quit, (void)) \
     X(void, gs_gfx_flush, (void)) \
     X(void, gs_gfx_set_title, (gs_gfx_bytes title)) \

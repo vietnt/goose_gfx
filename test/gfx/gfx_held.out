@@ -1,0 +1,5 @@
+five held frames asked to wait 2 s each took under 1 s: true
+held frames counted: 5
+a readback asked for in a held frame is submitted by it: ready true
+and reads 0,255,0,255
+the screen after held frames: 255,0,0,255

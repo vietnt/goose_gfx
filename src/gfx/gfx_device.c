@@ -13,6 +13,10 @@ gfx_state gfx;
    earlier open are gone once it changes. */
 static int64_t gfx_opens;
 
+/* The user event wake() pushes, 0 while gfx is closed: an atomic, since
+   wake() may come from any thread. */
+static SDL_AtomicU32 gfx_wake_event;
+
 /* --- errors ---------------------------------------------------------------- */
 
 static void gfx_vset(const char *fmt, va_list args) {
@@ -722,6 +726,7 @@ static bool gfx_start(bool windowed, gs_gfx_bytes title, int64_t width, int64_t 
     gfx.gpu_time_frame = -1;
     gfx.start_ns = gfx.last_ns = SDL_GetTicksNS();
     gfx.inject_event = SDL_RegisterEvents(1);
+    SDL_SetAtomicU32(&gfx_wake_event, SDL_RegisterEvents(1));
     gfx_opens++;
     return true;
 }
@@ -750,6 +755,7 @@ void gs_gfx_close(void) {
         if (gfx.window) SDL_ReleaseWindowFromGPUDevice(gfx.dev, gfx.window);
         SDL_DestroyGPUDevice(gfx.dev);
     }
+    SDL_SetAtomicU32(&gfx_wake_event, 0);
     free(gfx.events);
     for (int i = 0; i < gfx.ninjected; i++) SDL_free(gfx.injected[i]);
     free(gfx.injected);
@@ -951,15 +957,60 @@ static void gfx_frame_submit(void) {
 
 int64_t gs_gfx_frames_in_flight(void) { return gfx.frames_in_flight; }
 
-uint8_t gs_gfx_frame(void) {
-    if (!gfx_need_device("frame")) return 0;
+#if defined(SDL_PLATFORM_IOS) || defined(SDL_PLATFORM_TVOS)
+#include <CoreFoundation/CoreFoundation.h>
+#include <dispatch/dispatch.h>
+static void gfx_nothing(void *unused) { (void)unused; }
+#endif
+
+/* Until an event comes or `seconds` pass. UIKit has no wait of its own in
+   SDL, whose fallback polls every millisecond, so there the main run loop
+   runs until a source fires (a touch, a block on the main queue such as
+   wake() sends) or the time is up. */
+static void gfx_wait(double seconds) {
+    Uint64 until = SDL_GetTicksNS() + (Uint64)(seconds * 1e9);
+#if defined(SDL_PLATFORM_IOS) || defined(SDL_PLATFORM_TVOS)
+    SDL_PumpEvents();
+    while (!SDL_HasEvents(SDL_EVENT_FIRST, SDL_EVENT_LAST)) {
+        Uint64 now = SDL_GetTicksNS();
+        if (now >= until) break;
+        CFRunLoopRunInMode(kCFRunLoopDefaultMode, (double)(until - now) / 1e9, true);
+        SDL_PumpEvents();
+    }
+#else
+    Uint64 now = SDL_GetTicksNS();
+    if (now < until) SDL_WaitEventTimeout(NULL, (Sint32)SDL_min((until - now + 999999) / 1000000, 0x7fffffff));
+#endif
+}
+
+void gs_gfx_wake(void) {
+    Uint32 type = SDL_GetAtomicU32(&gfx_wake_event);
+    if (!type) return;
+    SDL_Event e;
+    SDL_zero(e);
+    e.type = type;
+    SDL_PushEvent(&e);
+#if defined(SDL_PLATFORM_IOS) || defined(SDL_PLATFORM_TVOS)
+    dispatch_async_f(dispatch_get_main_queue(), NULL, gfx_nothing);
+#endif
+}
+
+/* frame() and frame_held() alike: a held frame shows nothing new (no blit
+   into the window, unless the window lost what it showed), submits only
+   what was recorded, and with a window waits up to `wait` s for an event. */
+static uint8_t gfx_frame_end(const char *name, bool held, double wait) {
+    if (!gfx_need_device(name)) return 0;
     if (gfx.pass || gfx.cpass) {
-        gfx_misuse("frame() inside a %s pass: end the pass first", gfx.pass ? "render" : "compute");
+        gfx_misuse("%s() inside a %s pass: end the pass first", name, gfx.pass ? "render" : "compute");
         return 0;
     }
     /* The first call starts the first frame; every later one ends one. */
-    if (gfx.window && gfx.frames > 0) gfx_present();
-    gfx_frame_submit();
+    if (gfx.window && gfx.frames > 0 && (!held || gfx.must_show)) {
+        gfx_present();
+        gfx.must_show = false;
+    }
+    if (!held || gfx.cmd || gfx.readbacks_pending) gfx_frame_submit();
+    if (held && gfx.window && wait > 0.0) gfx_wait(wait);
     memset(gfx.pressed_keys, 0, sizeof gfx.pressed_keys);
     memset(gfx.released_keys, 0, sizeof gfx.released_keys);
     gfx.pressed_buttons = gfx.released_buttons = 0;
@@ -1032,6 +1083,11 @@ uint8_t gs_gfx_frame(void) {
                 gfx_update_input_scale();
                 resized = true;
                 break;
+            case SDL_EVENT_WINDOW_EXPOSED:
+            case SDL_EVENT_WINDOW_SHOWN:
+            case SDL_EVENT_WINDOW_RESTORED:
+                gfx.must_show = true;
+                break;
             default:
                 if (gfx.inject_event && e.type == gfx.inject_event && e.user.code >= 0 &&
                     e.user.code < gfx.ninjected) {
@@ -1061,6 +1117,10 @@ uint8_t gs_gfx_frame(void) {
     gfx_poll_timing();
     return !gfx.quit;
 }
+
+uint8_t gs_gfx_frame(void) { return gfx_frame_end("frame", false, 0.0); }
+
+uint8_t gs_gfx_frame_held(double wait) { return gfx_frame_end("frame_held", true, wait); }
 
 double gs_gfx_time(void) {
     return gfx.dev ? (double)(SDL_GetTicksNS() - gfx.start_ns) / 1e9 : 0.0;

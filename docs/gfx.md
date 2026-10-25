@@ -175,6 +175,19 @@ fields in the same order, and the same constant values.
   screen are ordinary texture downloads, and a minimized window (no swapchain
   image) only skips the blit. A headless device (`open_headless`, or `open`
   under `GOOSE_GFX_HEADLESS=1`) has the same screen and no window.
+* **A still screen costs nothing.** `frame_held(wait)` ends a frame that drew
+  nothing new: no blit into the window and no present (the window keeps the
+  picture it shows, so on Metal, Vulkan and Direct3D 12 alike nothing is
+  acquired from the swapchain), a submit only when commands were recorded,
+  and with a window a wait of up to `wait` s for an event before the
+  frame's events are handled. An exposed, shown or restored window is shown
+  again by the next held frame, from the screen, which held frames leave as
+  the last drawn frame left it. `wake()`, from any thread, ends the wait (a
+  download's progress, an answer from the system). SDL has no wait of its
+  own on UIKit (its fallback polls every millisecond), so there the wait
+  runs the main run loop until a source fires; elsewhere it is
+  `SDL_WaitEventTimeout`. Headless it does not wait (`gfx_held`;
+  `test/window/gfx_held.goose` checks the wait and wake()).
 * **At most two frames are on the GPU.** `frame()` submits each frame with
   a fence and, with two earlier ones still running, waits for the older
   before submitting, headless as well as windowed; `frames_in_flight()`

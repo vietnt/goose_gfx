@@ -201,6 +201,9 @@ typedef struct {
     char **injected;
     int ninjected, injected_cap;
     uint32_t inject_event;
+    /* The window lost what it showed (exposed, shown, restored): the next
+       frame_held() shows the screen again rather than nothing. */
+    bool must_show;
     /* The clipboard without a window: no one else is at it. */
     char *clipboard;
 
