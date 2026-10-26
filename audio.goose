@@ -6,6 +6,10 @@ import std;
 
 let MAX_SOUNDS: i32 = 256;
 let MAX_VOICES: i32 = 64;
+// A sound's state (sound_state): released, failed or never made; still loading; ready.
+let SOUND_GONE: i32 = 0;
+let SOUND_LOADING: i32 = 1;
+let SOUND_READY: i32 = 2;
 
 // Zero means no resource. Handles are not reused after release or close.
 struct Sound { id: u64 }
@@ -58,6 +62,21 @@ extern "gs_audio_load_sound_lowpass" fn load_sound_lowpass_raw(path: const u8[:]
 fn load_sound_lowpass(path: const u8[:], cut: f64, q: f64 = 0.7, from: f64 = 0.0, to: f64 = 0.0) -> Sound {
     load_sound_lowpass_raw(path, from, to, cut, q)
 }
+
+// load_sound and load_sound_lowpass decoded on the layer's own thread instead, so the call returns
+// at once. The sound is LOADING until its samples land (sound_state), and can be played, seeked
+// and released meanwhile: a voice on it waits silent at its place and starts once the sound is
+// READY. One thread decodes the sounds in the order they were asked for. A sound that fails to
+// load becomes GONE, its voices end, and error() says why. Releasing a sound still loading drops
+// its decoding; close drops what is queued and waits for the sound being decoded.
+extern "gs_audio_load_sound_later" fn load_sound_later_raw(path: const u8[:], from: f64, to: f64, cut: f64, q: f64) -> Sound;
+fn load_sound_later(path: const u8[:], from: f64 = 0.0, to: f64 = 0.0) -> Sound {
+    load_sound_later_raw(path, from, to, 0.0, 0.0)
+}
+fn load_sound_lowpass_later(path: const u8[:], cut: f64, q: f64 = 0.7, from: f64 = 0.0, to: f64 = 0.0) -> Sound {
+    load_sound_later_raw(path, from, to, cut, q)
+}
+extern "gs_audio_sound_state" fn sound_state(sound: Sound) -> i32;
 
 // Stops every voice using the sound, then frees its samples. Zero is harmless;
 // a stale nonzero handle returns false with an error.

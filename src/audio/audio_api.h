@@ -15,7 +15,10 @@ typedef struct { uint64_t id; } gs_audio_voice;
 
 #define GS_AUDIO_CONSTANTS(X) \
     X(i32, MAX_SOUNDS, 256) \
-    X(i32, MAX_VOICES, 64)
+    X(i32, MAX_VOICES, 64) \
+    X(i32, SOUND_GONE, 0) \
+    X(i32, SOUND_LOADING, 1) \
+    X(i32, SOUND_READY, 2)
 #define GS_AUDIO_CONST(type, name, value) enum { GS_AUDIO_##name = value };
 GS_AUDIO_CONSTANTS(GS_AUDIO_CONST)
 #undef GS_AUDIO_CONST
@@ -28,6 +31,8 @@ GS_AUDIO_CONSTANTS(GS_AUDIO_CONST)
     X(gs_audio_sound, gs_audio_create_sound, (gs_audio_f32_slice samples, int64_t sample_rate, int64_t channels)) \
     X(gs_audio_sound, gs_audio_load_sound, (gs_audio_bytes path, double from, double to)) \
     X(gs_audio_sound, gs_audio_load_sound_lowpass, (gs_audio_bytes path, double from, double to, double cut, double q)) \
+    X(gs_audio_sound, gs_audio_load_sound_later, (gs_audio_bytes path, double from, double to, double cut, double q)) \
+    X(int32_t, gs_audio_sound_state, (gs_audio_sound sound)) \
     X(uint8_t, gs_audio_release_sound, (gs_audio_sound sound)) \
     X(gs_audio_voice, gs_audio_play, (gs_audio_sound sound, float volume, float pan, float pitch, uint8_t loop)) \
     X(uint8_t, gs_audio_playing, (gs_audio_voice voice)) \

@@ -1,6 +1,9 @@
 /* A small PCM mixer. The callback never allocates, frees, or enters Goose.
-   SDL's stream lock protects all shared state. PCM copying happens outside
-   that lock so loading a sound does not block playback for its duration. */
+   SDL's stream lock and the table mutex protect all shared state (the mutex
+   alone when offline, where there is no stream). PCM copying happens outside
+   them so loading a sound does not block playback for its duration. A sound
+   loaded later is decoded on the layer's own thread, which takes the same
+   locks only to publish the samples. */
 #include "audio_api.h"
 #include <SDL3/SDL.h>
 #define DR_MP3_NO_STDIO
@@ -15,10 +18,18 @@
 
 typedef struct {
     uint64_t id;
-    float *samples;
+    float *samples;  /* NULL while the decoding thread still loads it */
     int64_t frames;
     int rate, channels;
 } audio_sound;
+
+/* A sound to decode on the loading thread, queued in order. */
+typedef struct audio_job {
+    struct audio_job *next;
+    uint64_t id;
+    double from, to, cut, q;
+    char path[1024];
+} audio_job;
 
 typedef struct {
     uint64_t id;
@@ -26,6 +37,7 @@ typedef struct {
     double position;
     float volume, pan, pitch;
     bool loop;
+    double seek;  /* seconds a seek asked for while its sound loaded (-1: none) */
 } audio_voice;
 
 static struct {
@@ -38,12 +50,22 @@ static struct {
     audio_voice voices[AUDIO_VOICES];
     char error[1024];
     uint64_t next_id;  /* Never reset: handles stay stale across close/open. */
+    SDL_Mutex *table;  /* made at the first open and kept; always taken after the stream lock */
+    /* The loading thread and its queue (under jobs_lock), started by the first sound loaded
+       later and joined by close. */
+    SDL_Thread *loader;
+    SDL_Mutex *jobs_lock;
+    SDL_Condition *jobs_wake;
+    audio_job *jobs, *jobs_last;
+    bool loader_quit;
 } audio;
 
 static void audio_lock(void) {
     if (audio.stream) SDL_LockAudioStream(audio.stream);
+    SDL_LockMutex(audio.table);
 }
 static void audio_unlock(void) {
+    SDL_UnlockMutex(audio.table);
     if (audio.stream) SDL_UnlockAudioStream(audio.stream);
 }
 static uint8_t audio_fail(const char *message) {
@@ -92,6 +114,14 @@ static void audio_mix(float *out, int64_t frames) {
         audio_voice *voice = &audio.voices[v];
         if (!voice->id) continue;
         audio_sound *sound = voice->sound;
+        // A voice on a sound still loading waits at its place; one seeked past the end of what
+        // landed wraps or ends, as a seek would have.
+        if (!sound->samples) continue;
+        if (voice->seek >= 0) { voice->position = voice->seek * sound->rate; voice->seek = -1; }
+        if (voice->position >= sound->frames) {
+            if (voice->loop) voice->position = fmod(voice->position, (double)sound->frames);
+            else { voice->id = 0; continue; }
+        }
         double step = (double)sound->rate / audio.rate * voice->pitch;
         float left = voice->volume * (voice->pan > 0 ? 1 - voice->pan : 1);
         float right = voice->volume * (voice->pan < 0 ? 1 + voice->pan : 1);
@@ -150,6 +180,7 @@ uint8_t gs_audio_open(int64_t sample_rate, uint8_t offline) {
     }
     audio_unlock();
     if (!audio_rate(sample_rate)) return audio_fail("sample rate must be 8000..192000 Hz");
+    if (!audio.table && !(audio.table = SDL_CreateMutex())) return audio_sdl_fail();
     audio.rate = (int)sample_rate;
     audio.offline = offline != 0;
     audio.paused = false;
@@ -173,7 +204,11 @@ uint8_t gs_audio_open(int64_t sample_rate, uint8_t offline) {
     return 1;
 }
 
+static void audio_loader_stop(void);
+
 void gs_audio_close(void) {
+    // The loading thread first: it drops what is queued and ends after the sound it decodes.
+    audio_loader_stop();
     // Destroy waits for the callback and closes the device before samples free.
     if (audio.stream) {
         SDL_DestroyAudioStream(audio.stream);
@@ -216,12 +251,6 @@ static bool audio_is_open(void) {
     if (!open) audio_fail("audio is not open");
     audio_unlock();
     return open;
-}
-
-static void audio_failf(const char *what, const char *path, const char *why) {
-    audio_lock();
-    snprintf(audio.error, sizeof audio.error, "%s %s%s%s", what, path, why ? ": " : "", why ? why : "");
-    audio_unlock();
 }
 
 gs_audio_sound gs_audio_create_sound(gs_audio_f32_slice samples, int64_t sample_rate,
@@ -290,6 +319,49 @@ static void audio_lowpass(float *pcm, int64_t frames, int channels, int rate, do
     }
 }
 
+/* Reads and decodes an MP3 into owned samples (filtered, cut to from .. to and kept in [-1, 1]);
+   touches no shared state, so the loading thread runs it too. NULL with why set when it fails. */
+static float *audio_decode(const char *name, double from, double to, double cut, double q,
+                           int64_t *out_frames, int *out_rate, int *out_channels,
+                           char *why, size_t why_len) {
+    // SDL_LoadFile reads app bundles and, on Android, the APK's assets.
+    size_t size = 0;
+    void *file = SDL_LoadFile(name, &size);
+    if (!file) { snprintf(why, why_len, "cannot read %s: %s", name, SDL_GetError()); return NULL; }
+    drmp3_allocation_callbacks heap = { NULL, audio_malloc, audio_realloc, audio_free };
+    drmp3_config config = { 0 };
+    drmp3_uint64 frames = 0;
+    float *pcm = drmp3_open_memory_and_read_pcm_frames_f32(file, size, &config, &frames, &heap);
+    SDL_free(file);
+    if (!pcm || !frames) { free(pcm); snprintf(why, why_len, "cannot decode %s: not an MP3", name); return NULL; }
+    int channels = (int)config.channels, rate = (int)config.sampleRate;
+    if ((channels != 1 && channels != 2) || !audio_rate(rate)) {
+        free(pcm);
+        snprintf(why, why_len, "cannot play %s: not mono or stereo at 8000..192000 Hz", name);
+        return NULL;
+    }
+    if (cut > 0) audio_lowpass(pcm, (int64_t)frames, channels, rate, cut, q);
+    int64_t first = from > 0 ? (int64_t)(from * rate) : 0;
+    int64_t end = to > 0 ? (int64_t)(to * rate) : (int64_t)frames;
+    if (end > (int64_t)frames) end = (int64_t)frames;
+    if (first >= end) { free(pcm); snprintf(why, why_len, "nothing to play in %s: from is at or past to", name); return NULL; }
+    int64_t count = (end - first) * channels;
+    if (first) memmove(pcm, pcm + first * channels, (size_t)count * sizeof(float));
+    // A decoder can overshoot full scale a little; the mixer takes [-1, 1].
+    for (int64_t i = 0; i < count; ++i) pcm[i] = pcm[i] > 1 ? 1 : pcm[i] < -1 ? -1 : pcm[i];
+    *out_frames = end - first;
+    *out_rate = rate;
+    *out_channels = channels;
+    return pcm;
+}
+
+static void audio_path(gs_audio_bytes path, char *name, size_t size) {
+    size_t n = path.len < 0 || !path.data ? 0 : (size_t)path.len;
+    if (n >= size) n = size - 1;
+    if (n) memcpy(name, path.data, n);
+    name[n] = 0;
+}
+
 gs_audio_sound gs_audio_load_sound(gs_audio_bytes path, double from, double to) {
     return gs_audio_load_sound_lowpass(path, from, to, 0, 0);
 }
@@ -297,37 +369,122 @@ gs_audio_sound gs_audio_load_sound(gs_audio_bytes path, double from, double to) 
 gs_audio_sound gs_audio_load_sound_lowpass(gs_audio_bytes path, double from, double to, double cut, double q) {
     gs_audio_sound result = { 0 };
     if (!audio_is_open()) return result;
-    char name[1024];
-    size_t n = path.len < 0 || !path.data ? 0 : (size_t)path.len;
-    if (n >= sizeof name) n = sizeof name - 1;
-    if (n) memcpy(name, path.data, n);
-    name[n] = 0;
-    // SDL_LoadFile reads app bundles and, on Android, the APK's assets.
-    size_t size = 0;
-    void *file = SDL_LoadFile(name, &size);
-    if (!file) { audio_failf("cannot read", name, SDL_GetError()); return result; }
-    drmp3_allocation_callbacks heap = { NULL, audio_malloc, audio_realloc, audio_free };
-    drmp3_config config = { 0 };
-    drmp3_uint64 frames = 0;
-    float *pcm = drmp3_open_memory_and_read_pcm_frames_f32(file, size, &config, &frames, &heap);
-    SDL_free(file);
-    if (!pcm || !frames) { free(pcm); audio_failf("cannot decode", name, "not an MP3"); return result; }
-    int channels = (int)config.channels, rate = (int)config.sampleRate;
-    if ((channels != 1 && channels != 2) || !audio_rate(rate)) {
+    char name[1024], why[1024];
+    audio_path(path, name, sizeof name);
+    int64_t frames = 0;
+    int rate = 0, channels = 0;
+    float *pcm = audio_decode(name, from, to, cut, q, &frames, &rate, &channels, why, sizeof why);
+    if (!pcm) { audio_lock(); audio_fail(why); audio_unlock(); return result; }
+    return audio_add_sound(pcm, frames, rate, channels);
+}
+
+/* The slot of a sound still loading, under the locks; NULL once it is released or closed. */
+static audio_sound *audio_loading(uint64_t id) {
+    for (int i = 0; i < AUDIO_SOUNDS; ++i)
+        if (audio.sounds[i].id == id && !audio.sounds[i].samples) return &audio.sounds[i];
+    return NULL;
+}
+
+/* The loading thread: decodes each queued sound in turn and publishes it into its slot, unless
+   the sound was released meanwhile; a sound that fails to load is released, its voices with it,
+   and its reason becomes the error. */
+static int SDLCALL audio_loader(void *user) {
+    (void)user;
+    for (;;) {
+        SDL_LockMutex(audio.jobs_lock);
+        while (!audio.jobs && !audio.loader_quit) SDL_WaitCondition(audio.jobs_wake, audio.jobs_lock);
+        audio_job *job = audio.loader_quit ? NULL : audio.jobs;
+        if (job && !(audio.jobs = job->next)) audio.jobs_last = NULL;
+        SDL_UnlockMutex(audio.jobs_lock);
+        if (!job) return 0;
+        audio_lock();
+        bool wanted = audio_loading(job->id) != NULL;
+        audio_unlock();
+        int64_t frames = 0;
+        int rate = 0, channels = 0;
+        char why[1024];
+        float *pcm = wanted ? audio_decode(job->path, job->from, job->to, job->cut, job->q,
+                                           &frames, &rate, &channels, why, sizeof why) : NULL;
+        audio_lock();
+        audio_sound *slot = audio_loading(job->id);
+        if (slot && pcm) {
+            slot->frames = frames;
+            slot->rate = rate;
+            slot->channels = channels;
+            slot->samples = pcm;
+            pcm = NULL;
+        } else if (slot) {
+            for (int i = 0; i < AUDIO_VOICES; ++i)
+                if (audio.voices[i].sound == slot) audio.voices[i].id = 0;
+            memset(slot, 0, sizeof *slot);
+            audio_fail(why);
+        }
+        audio_unlock();
         free(pcm);
-        audio_failf("cannot play", name, "not mono or stereo at 8000..192000 Hz");
+        free(job);
+    }
+}
+
+static void audio_loader_stop(void) {
+    if (!audio.loader) return;
+    SDL_LockMutex(audio.jobs_lock);
+    while (audio.jobs) { audio_job *next = audio.jobs->next; free(audio.jobs); audio.jobs = next; }
+    audio.jobs_last = NULL;
+    audio.loader_quit = true;
+    SDL_SignalCondition(audio.jobs_wake);
+    SDL_UnlockMutex(audio.jobs_lock);
+    SDL_WaitThread(audio.loader, NULL);
+    audio.loader = NULL;
+    audio.loader_quit = false;
+}
+
+gs_audio_sound gs_audio_load_sound_later(gs_audio_bytes path, double from, double to, double cut, double q) {
+    gs_audio_sound result = { 0 };
+    if (!audio_is_open()) return result;
+    audio_job *job = (audio_job *)calloc(1, sizeof *job);
+    if (!job) { audio_lock(); audio_fail("out of memory queueing a sound"); audio_unlock(); return result; }
+    audio_path(path, job->path, sizeof job->path);
+    job->from = from;
+    job->to = to;
+    job->cut = cut;
+    job->q = q;
+    if (!audio.jobs_lock && !(audio.jobs_lock = SDL_CreateMutex())) { free(job); audio_lock(); audio_sdl_fail(); audio_unlock(); return result; }
+    if (!audio.jobs_wake && !(audio.jobs_wake = SDL_CreateCondition())) { free(job); audio_lock(); audio_sdl_fail(); audio_unlock(); return result; }
+    if (!audio.loader && !(audio.loader = SDL_CreateThread(audio_loader, "goose audio loader", NULL))) {
+        free(job);
+        audio_lock();
+        audio_sdl_fail();
+        audio_unlock();
         return result;
     }
-    if (cut > 0) audio_lowpass(pcm, (int64_t)frames, channels, rate, cut, q);
-    int64_t first = from > 0 ? (int64_t)(from * rate) : 0;
-    int64_t end = to > 0 ? (int64_t)(to * rate) : (int64_t)frames;
-    if (end > (int64_t)frames) end = (int64_t)frames;
-    if (first >= end) { free(pcm); audio_failf("nothing to play in", name, "from is at or past to"); return result; }
-    int64_t count = (end - first) * channels;
-    if (first) memmove(pcm, pcm + first * channels, (size_t)count * sizeof(float));
-    // A decoder can overshoot full scale a little; the mixer takes [-1, 1].
-    for (int64_t i = 0; i < count; ++i) pcm[i] = pcm[i] > 1 ? 1 : pcm[i] < -1 ? -1 : pcm[i];
-    return audio_add_sound(pcm, end - first, rate, channels);
+    // The slot first, empty (loading), so the sound can be played, seeked and released at once.
+    audio_lock();
+    audio_sound *slot = NULL;
+    for (int i = 0; i < AUDIO_SOUNDS; ++i)
+        if (!audio.sounds[i].id) { slot = &audio.sounds[i]; break; }
+    if (!slot) audio_fail("all 256 sound slots are in use");
+    else if ((result.id = audio_id()) != 0)
+        *slot = (audio_sound){ result.id, NULL, 0, 0, 0 };
+    audio_unlock();
+    if (!result.id) { free(job); return result; }
+    job->id = result.id;
+    SDL_LockMutex(audio.jobs_lock);
+    if (audio.jobs_last) audio.jobs_last->next = job; else audio.jobs = job;
+    audio.jobs_last = job;
+    SDL_SignalCondition(audio.jobs_wake);
+    SDL_UnlockMutex(audio.jobs_lock);
+    return result;
+}
+
+int32_t gs_audio_sound_state(gs_audio_sound sound) {
+    if (!sound.id) return GS_AUDIO_SOUND_GONE;
+    audio_lock();
+    int32_t state = GS_AUDIO_SOUND_GONE;
+    for (int i = 0; i < AUDIO_SOUNDS; ++i)
+        if (audio.sounds[i].id == sound.id)
+            state = audio.sounds[i].samples ? GS_AUDIO_SOUND_READY : GS_AUDIO_SOUND_LOADING;
+    audio_unlock();
+    return state;
 }
 
 uint8_t gs_audio_release_sound(gs_audio_sound sound) {
@@ -359,7 +516,7 @@ gs_audio_voice gs_audio_play(gs_audio_sound sound, float volume, float pan,
         else {
             result.id = audio_id();
             if (result.id)
-                *slot = (audio_voice){ result.id, source, 0, volume, pan, pitch, loop != 0 };
+                *slot = (audio_voice){ result.id, source, 0, volume, pan, pitch, loop != 0, -1 };
         }
     }
     audio_unlock();
@@ -412,7 +569,8 @@ uint8_t gs_audio_seek(gs_audio_voice voice, double seconds) {
     else if (!(seconds >= 0 && seconds < 1e9)) audio_fail("seek: seconds must be 0 or more (finite)");
     else {
         double at = seconds * slot->sound->rate;
-        if (at < (double)slot->sound->frames) slot->position = at;
+        if (!slot->sound->samples) slot->seek = seconds;  /* placed once its rate is known */
+        else if (at < (double)slot->sound->frames) slot->position = at;
         else if (slot->loop) slot->position = fmod(at, (double)slot->sound->frames);
         else slot->id = 0;
         ok = true;

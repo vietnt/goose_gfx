@@ -7,6 +7,17 @@ until `release_sound` or `close`. `load_sound` decodes an MP3 there, and
 it (cut Hz, Q in dB) there too, so a filtered sound never passes through Goose. Releasing a sound stops every voice referring
 to it. This makes source-array lifetimes independent of asynchronous playback.
 
+`load_sound_later` and `load_sound_lowpass_later` do the same decoding on the
+layer's own loading thread, so the call returns at once and no frame waits for
+an MP3. The sound is `SOUND_LOADING` until its samples land, then
+`SOUND_READY` (`sound_state`); one that fails to load becomes `SOUND_GONE` and
+`error()` says why. It can be played, seeked and released while it loads: a
+voice on it waits silent at its place (a seek is kept, in seconds) and plays
+once the samples land. One thread decodes the sounds in the order they were
+asked for, skipping one released before its turn. A program whose voice must
+start on a beat checks `sound_state` and waits for it in its own time, as the
+Goose books' player holds a page's time.
+
 The implementation is `src/audio/audio.c`; `audio_api.h` is its packed extern
 boundary and JIT symbol list. `test/api_check.py audio` checks the C and Goose
 declarations. The compiler tracks native audio calls and rejects them from
@@ -33,7 +44,11 @@ the default playback device. SDL performs the conversion to the physical device
 format. Its get callback fills requests in blocks of at most 256 frames. The
 stream lock protects tables and error text. Main-thread PCM allocation/copy and
 release happen outside that lock; only table publication/removal occurs inside.
-Closing destroys the stream (synchronizing with its callback), then frees PCM
+The loading thread decodes outside every lock and takes the stream lock and the
+table mutex only to publish a sound's samples into its slot; offline, where
+there is no stream, the table mutex alone guards the tables. Closing first
+drops the queued sounds and joins the loading thread (after the sound it is
+decoding), then destroys the stream (synchronizing with its callback), then frees PCM
 and decrements only SDL's audio subsystem reference. gfx can close independently.
 
 `open_offline` starts no SDL subsystem, device or thread. `render` advances the
@@ -56,7 +71,10 @@ overlap, clipping, exhaustion, stale handles, close/open, and bad input.
 
 The explicit `goose_audio_test` CMake target uses SDL's dummy driver to exercise
 the actual callback, device-open failure and recovery, nonfinite inputs,
-packed unaligned slices, concurrent table access, release during playback, and close/reopen. Run, for
+packed unaligned slices, concurrent table access, release during playback, close/reopen, and
+sounds loaded later (`test/tone.mp3`): the same samples as loaded at once, filtered or not, a
+voice played and seeked while its sound loads, a missing file, release while loading, and close
+with sounds queued. Run, for
 example, `cmake --build build --config Release --target goose_audio_test`, then
 `build/Release/goose_audio_test.exe` on Windows (or `build/goose_audio_test` with
 a single-config generator). It needs no window, GPU, speakers, or audio session.

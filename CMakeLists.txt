@@ -141,6 +141,8 @@ target_link_libraries(goose_gfx_package INTERFACE goose_gfx goose_audio goose_ui
 add_executable(goose_audio_test EXCLUDE_FROM_ALL test/audio_device.c)
 target_link_libraries(goose_audio_test PRIVATE goose_audio)
 set_target_properties(goose_audio_test PROPERTIES C_STANDARD 11)
+target_compile_definitions(goose_audio_test PRIVATE
+    GOOSE_AUDIO_TEST_MP3="${CMAKE_CURRENT_SOURCE_DIR}/test/tone.mp3")
 
 file(STRINGS "${GOOSE_GFX_SDL}/include/SDL3/SDL_version.h" gfx_sdl_version
      REGEX "^#define SDL_(MAJOR|MINOR|MICRO)_VERSION +[0-9]+")
