@@ -1150,16 +1150,21 @@ static void gfx_free_readback(void *item) { gfx_readback_free((gfx_readback_slot
 
 /* --- pictures decoded later ------------------------------------------------- */
 /* load_image_later queues a WebP file for the package's loading threads, which
-   decode it into pages of its own with its edge pixels repeated border px
-   round it (so a linear sampler at the picture's edge reads only the picture);
-   image_later_state, on the program's thread, uploads a decoded one into its
-   texture's rect and frees its pixels. Only that upload (a copy into a
-   transfer buffer, then a copy pass in order with the frame's work) is on the
-   program's thread, so a frame that asks for pictures does not decode them.
+   decode it with its edge pixels repeated border px round it (so a linear
+   sampler at the picture's edge reads only the picture) straight into an
+   upload buffer of the ring; image_later_state, on the program's thread,
+   records that buffer's copy into the texture's rect, in order with the
+   frame's work, and hands the buffer back. So nothing is decoded, copied or
+   allocated on the program's thread for a picture: the ring's GFX_RING
+   transfer buffers are made once, the size of the largest picture asked for,
+   mapped there and refilled by the threads, and SDL cycles one the GPU is
+   still reading from. image_later_release lets the ring go once a batch of
+   pictures is in. Each thread reads its files into one buffer of its own.
    image_size_later reads only a WebP's size, from its header, on the same
    threads (a book's pictures sized before they are packed, with no file
    opened on the program's thread); image_size_state gives it. */
 #define GFX_LOADERS 2
+#define GFX_RING 4
 typedef struct gfx_later {
     struct gfx_later *next;
     int64_t id;
@@ -1167,66 +1172,134 @@ typedef struct gfx_later {
     gs_gfx_texture t;
     int32_t x, y, w, h, border;
     bool size_only;  /* image_size_later: its size read into w and h, no pixels */
-    int state;    /* 0 queued, 1 decoding, 2 decoded, 3 failed */
-    uint8_t *px;  /* (w + 2 border) x (h + 2 border) RGBA rows, from gfx_pages */
-    size_t bytes;
+    int state;       /* 0 queued, 1 decoding, 2 decoded, 3 failed */
+    int slot;        /* the ring's buffer it is decoded into (-1: none) */
     char why[1280];
 } gfx_later;
+
+/* A buffer of the ring: its transfer buffer (size bytes), mapped at p while it
+   is free or being filled (NULL: not mapped), and the job filling it or
+   filled into it (NULL: free). */
+typedef struct {
+    SDL_GPUTransferBuffer *tb;
+    uint32_t size;
+    uint8_t *p;
+    gfx_later *job;
+} gfx_ring_buf;
 
 static struct {
     SDL_Mutex *lock;
     SDL_Condition *wake;
     SDL_Thread *threads[GFX_LOADERS];
-    gfx_later *jobs;  /* every job not yet taken by image_later_state, oldest first */
+    gfx_later *jobs;  /* every job not yet taken by its state call, oldest first */
     int64_t next_id;  /* never reset: a job's number is never another's */
     bool quit;
+    gfx_ring_buf ring[GFX_RING];
+    uint32_t ring_size;  /* the largest picture asked for since the ring was let go */
 } gfx_laters;
 
-/* The picture at path, w x h, decoded with its edge pixels border px round it;
-   NULL with why set. Any thread. */
-static uint8_t *gfx_decode_bordered(const char *path, int32_t w, int32_t h, int32_t b,
-                                    size_t *bytes_out, char *why, size_t n) {
-    size_t size = 0;
-    void *file = SDL_LoadFile(path, &size);
-    if (!file) {
-        snprintf(why, n, "cannot load %s: %s", path, SDL_GetError());
-        return NULL;
+static size_t gfx_later_bytes(const gfx_later *j) {
+    return (size_t)(j->w + 2 * j->border) * 4 * (size_t)(j->h + 2 * j->border);
+}
+
+/* Ring buffer i made ready for a thread to fill, on the program's thread with
+   the lock held: made again when it is smaller than ring_size, mapped (cycled:
+   the GPU may still be reading what it held). False with the error set. */
+static bool gfx_ring_ready(int i) {
+    gfx_ring_buf *r = &gfx_laters.ring[i];
+    if (r->tb && r->size < gfx_laters.ring_size) {
+        if (r->p) SDL_UnmapGPUTransferBuffer(gfx.dev, r->tb);
+        SDL_ReleaseGPUTransferBuffer(gfx.dev, r->tb);
+        r->tb = NULL;
+        r->p = NULL;
     }
-    uint8_t *px = NULL;
-    int fw = 0, fh = 0;
-    if (!WebPGetInfo((const uint8_t *)file, size, &fw, &fh)) {
-        snprintf(why, n, "cannot load %s: not a WebP image", path);
-    } else if (fw != w || fh != h) {
-        snprintf(why, n, "%s is %d x %d, not %d x %d", path, fw, fh, w, h);
+    if (!r->tb) {
+        if (!(r->tb = gfx_transfer(gfx_laters.ring_size, true))) return false;
+        r->size = gfx_laters.ring_size;
+    }
+    if (!r->p && !(r->p = (uint8_t *)SDL_MapGPUTransferBuffer(gfx.dev, r->tb, true)))
+        return gfx_sdl_fail("mapping a transfer buffer");
+    return true;
+}
+
+/* The ring let go, on the program's thread with the lock held: every buffer no
+   job holds. */
+static void gfx_ring_drop(void) {
+    for (int i = 0; i < GFX_RING; i++) {
+        gfx_ring_buf *r = &gfx_laters.ring[i];
+        if (!r->tb || r->job) continue;
+        if (r->p) SDL_UnmapGPUTransferBuffer(gfx.dev, r->tb);
+        SDL_ReleaseGPUTransferBuffer(gfx.dev, r->tb);
+        r->tb = NULL;
+        r->p = NULL;
+        r->size = 0;
+    }
+    bool held = false;
+    for (int i = 0; i < GFX_RING; i++) held |= gfx_laters.ring[i].tb != NULL;
+    if (!held) gfx_laters.ring_size = 0;
+}
+
+/* The file at path read into *buf (grown as needed, kept for the next); its
+   size, or 0 with why set. Any thread. */
+static size_t gfx_read_into(const char *path, uint8_t **buf, size_t *cap, char *why, size_t n) {
+    SDL_IOStream *io = SDL_IOFromFile(path, "rb");
+    if (!io) {
+        snprintf(why, n, "cannot load %s: %s", path, SDL_GetError());
+        return 0;
+    }
+    Sint64 size = SDL_GetIOSize(io);
+    size_t got = 0;
+    if (size <= 0) {
+        snprintf(why, n, "cannot load %s: %s", path, size < 0 ? SDL_GetError() : "an empty file");
     } else {
-        size_t stride = (size_t)(w + 2 * b) * 4, rows = (size_t)(h + 2 * b);
-        size_t bytes = stride * rows, at = stride * (size_t)b + (size_t)b * 4;
-        px = (uint8_t *)gfx_pages(bytes);
-        if (!px) {
-            snprintf(why, n, "cannot load %s: out of memory", path);
-        } else if (!WebPDecodeRGBAInto((const uint8_t *)file, size, px + at, bytes - at, (int)stride)) {
-            snprintf(why, n, "cannot load %s: not a WebP image", path);
-            gfx_free_pages(px, bytes);
-            px = NULL;
-        } else {
-            /* each row's first and last pixels out to the sides, then the first
-               and last rows whole (the corners with them) above and below */
-            for (int32_t y = b; y < b + h; y++) {
-                uint8_t *row = px + stride * (size_t)y;
-                for (int32_t k = 0; k < b; k++) {
-                    memcpy(row + (size_t)k * 4, row + (size_t)b * 4, 4);
-                    memcpy(row + (size_t)(b + w + k) * 4, row + (size_t)(b + w - 1) * 4, 4);
-                }
-            }
-            for (int32_t k = 0; k < b; k++) {
-                memcpy(px + stride * (size_t)k, px + stride * (size_t)b, stride);
-                memcpy(px + stride * (size_t)(b + h + k), px + stride * (size_t)(b + h - 1), stride);
-            }
-            *bytes_out = bytes;
+        if ((size_t)size > *cap) {
+            uint8_t *grown = (uint8_t *)realloc(*buf, (size_t)size);
+            if (grown) { *buf = grown; *cap = (size_t)size; }
+        }
+        if ((size_t)size > *cap) snprintf(why, n, "cannot load %s: out of memory", path);
+        else if ((got = SDL_ReadIO(io, *buf, (size_t)size)) != (size_t)size) {
+            snprintf(why, n, "cannot load %s: %s", path, SDL_GetError());
+            got = 0;
         }
     }
-    SDL_free(file);
-    return px;
+    SDL_CloseIO(io);
+    return got;
+}
+
+/* The WebP in file (size bytes), w x h, decoded into px with its edge pixels
+   border px round it, rows of (w + 2 border) x 4 bytes; false with why set.
+   Any thread. */
+static bool gfx_decode_bordered(const char *path, const uint8_t *file, size_t size, int32_t w,
+                                int32_t h, int32_t b, uint8_t *px, char *why, size_t n) {
+    int fw = 0, fh = 0;
+    if (!WebPGetInfo(file, size, &fw, &fh)) {
+        snprintf(why, n, "cannot load %s: not a WebP image", path);
+        return false;
+    }
+    if (fw != w || fh != h) {
+        snprintf(why, n, "%s is %d x %d, not %d x %d", path, fw, fh, w, h);
+        return false;
+    }
+    size_t stride = (size_t)(w + 2 * b) * 4, rows = (size_t)(h + 2 * b);
+    size_t bytes = stride * rows, at = stride * (size_t)b + (size_t)b * 4;
+    if (!WebPDecodeRGBAInto(file, size, px + at, bytes - at, (int)stride)) {
+        snprintf(why, n, "cannot load %s: not a WebP image", path);
+        return false;
+    }
+    /* each row's first and last pixels out to the sides, then the first and
+       last rows whole (the corners with them) above and below */
+    for (int32_t y = b; y < b + h; y++) {
+        uint8_t *row = px + stride * (size_t)y;
+        for (int32_t k = 0; k < b; k++) {
+            memcpy(row + (size_t)k * 4, row + (size_t)b * 4, 4);
+            memcpy(row + (size_t)(b + w + k) * 4, row + (size_t)(b + w - 1) * 4, 4);
+        }
+    }
+    for (int32_t k = 0; k < b; k++) {
+        memcpy(px + stride * (size_t)k, px + stride * (size_t)b, stride);
+        memcpy(px + stride * (size_t)(b + h + k), px + stride * (size_t)(b + h - 1), stride);
+    }
+    return true;
 }
 
 /* A WebP's size from its first 30 bytes (the RIFF header and its first
@@ -1260,35 +1333,56 @@ static bool gfx_webp_size(const char *path, int32_t *w, int32_t *h, char *why, s
     return false;
 }
 
+/* The next job a thread can do, under the lock: a size, or a picture when a
+   ring buffer is free and mapped (taken for it); NULL for none. */
+static gfx_later *gfx_later_next(void) {
+    int free_buf = -1;
+    for (int i = 0; i < GFX_RING && free_buf < 0; i++) {
+        gfx_ring_buf *r = &gfx_laters.ring[i];
+        if (r->p && !r->job) free_buf = i;
+    }
+    for (gfx_later *j = gfx_laters.jobs; j; j = j->next) {
+        if (j->state != 0) continue;
+        if (j->size_only) return j;
+        if (free_buf >= 0 && gfx_laters.ring[free_buf].size >= gfx_later_bytes(j)) {
+            gfx_laters.ring[free_buf].job = j;
+            j->slot = free_buf;
+            return j;
+        }
+    }
+    return NULL;
+}
+
 static int SDLCALL gfx_later_loader(void *user) {
     (void)user;
+    uint8_t *file = NULL;  /* this thread's read buffer, kept from file to file */
+    size_t cap = 0;
     for (;;) {
         SDL_LockMutex(gfx_laters.lock);
         gfx_later *j = NULL;
-        while (!gfx_laters.quit) {
-            for (j = gfx_laters.jobs; j && j->state != 0; j = j->next) {}
-            if (j) break;
-            SDL_WaitCondition(gfx_laters.wake, gfx_laters.lock);
-        }
+        while (!gfx_laters.quit && !(j = gfx_later_next())) SDL_WaitCondition(gfx_laters.wake, gfx_laters.lock);
         if (gfx_laters.quit) {
             SDL_UnlockMutex(gfx_laters.lock);
+            free(file);
             return 0;
         }
         /* the job stays in the list, owned by this thread, until it is marked
-           decoded: only image_later_state takes a job out, and only then */
+           done: only its state call takes a job out, and only then; its ring
+           buffer stays mapped until then */
         j->state = 1;
+        uint8_t *px = j->slot >= 0 ? gfx_laters.ring[j->slot].p : NULL;
         SDL_UnlockMutex(gfx_laters.lock);
-        size_t bytes = 0;
         char why[sizeof j->why];
         why[0] = 0;
         int32_t w = 0, h = 0;
         bool ok = false;
-        uint8_t *px = NULL;
-        if (j->size_only) ok = gfx_webp_size(j->path, &w, &h, why, sizeof why);
-        else ok = (px = gfx_decode_bordered(j->path, j->w, j->h, j->border, &bytes, why, sizeof why)) != NULL;
+        if (j->size_only) {
+            ok = gfx_webp_size(j->path, &w, &h, why, sizeof why);
+        } else {
+            size_t size = gfx_read_into(j->path, &file, &cap, why, sizeof why);
+            ok = size && gfx_decode_bordered(j->path, file, size, j->w, j->h, j->border, px, why, sizeof why);
+        }
         SDL_LockMutex(gfx_laters.lock);
-        j->px = px;
-        j->bytes = bytes;
         if (j->size_only) { j->w = w; j->h = h; }
         memcpy(j->why, why, sizeof why);
         j->state = ok ? 2 : 3;
@@ -1297,7 +1391,8 @@ static int SDLCALL gfx_later_loader(void *user) {
     }
 }
 
-/* The loading threads stopped and every job dropped (gs_gfx_close). */
+/* The loading threads stopped, every job dropped and the ring let go
+   (gs_gfx_close, before the device goes). */
 void gfx_later_stop(void) {
     if (!gfx_laters.lock) return;
     SDL_LockMutex(gfx_laters.lock);
@@ -1310,10 +1405,11 @@ void gfx_later_stop(void) {
     }
     while (gfx_laters.jobs) {
         gfx_later *next = gfx_laters.jobs->next;
-        if (gfx_laters.jobs->px) gfx_free_pages(gfx_laters.jobs->px, gfx_laters.jobs->bytes);
         free(gfx_laters.jobs);
         gfx_laters.jobs = next;
     }
+    for (int i = 0; i < GFX_RING; i++) gfx_laters.ring[i].job = NULL;
+    if (gfx.dev) gfx_ring_drop();
     gfx_laters.quit = false;
 }
 
@@ -1330,23 +1426,23 @@ static gfx_later *gfx_later_new(gs_gfx_bytes path, const char *what) {
     gfx_later *j = (gfx_later *)calloc(1, sizeof *j);
     if (!j) return gfx_fail("%s: out of memory", what), NULL;
     memcpy(j->path, path.data, (size_t)path.len);
+    j->slot = -1;
     return j;
 }
 
-/* Job j queued for the loading threads; its number. */
-static int64_t gfx_later_queue(gfx_later *j) {
-    SDL_LockMutex(gfx_laters.lock);
+/* Job j queued for the loading threads, with the lock held; its number. */
+static int64_t gfx_later_queue_locked(gfx_later *j) {
     j->id = ++gfx_laters.next_id;
     gfx_later **end = &gfx_laters.jobs;
     while (*end) end = &(*end)->next;
     *end = j;
-    SDL_SignalCondition(gfx_laters.wake);
-    SDL_UnlockMutex(gfx_laters.lock);
+    SDL_BroadcastCondition(gfx_laters.wake);
     return j->id;
 }
 
-/* Job number job taken out of the list once it is done (the caller frees it);
-   GFX_LATER_BUSY while it is not; NULL, with the error set, for no such job. */
+/* Job number job taken out of the list once it is done (the caller frees it,
+   and hands back its ring buffer); GFX_LATER_BUSY while it is not; NULL, with
+   the error set, for no such job. */
 static gfx_later gfx_later_busy;
 #define GFX_LATER_BUSY (&gfx_later_busy)
 static gfx_later *gfx_later_take(int64_t job, const char *what) {
@@ -1388,14 +1484,37 @@ int64_t gs_gfx_load_image_later(gs_gfx_bytes path, gs_gfx_texture t, int32_t x, 
     j->w = w;
     j->h = h;
     j->border = border;
-    return gfx_later_queue(j);
+    /* the ring as large as the largest picture asked for, every buffer no job
+       holds made ready now (one a job holds when it is handed back) */
+    SDL_LockMutex(gfx_laters.lock);
+    size_t bytes = gfx_later_bytes(j);
+    if (bytes > UINT32_MAX) {
+        SDL_UnlockMutex(gfx_laters.lock);
+        free(j);
+        return gfx_fail("%s: a %d x %d picture is too large to upload", what, w, h), 0;
+    }
+    if (bytes > gfx_laters.ring_size) gfx_laters.ring_size = (uint32_t)bytes;
+    bool ready = true;
+    for (int i = 0; i < GFX_RING; i++)
+        if (!gfx_laters.ring[i].job) ready &= gfx_ring_ready(i);
+    if (!ready) {
+        SDL_UnlockMutex(gfx_laters.lock);
+        free(j);
+        return 0;
+    }
+    int64_t id = gfx_later_queue_locked(j);
+    SDL_UnlockMutex(gfx_laters.lock);
+    return id;
 }
 
 int64_t gs_gfx_image_size_later(gs_gfx_bytes path) {
     gfx_later *j = gfx_later_new(path, "image_size_later");
     if (!j) return 0;
     j->size_only = true;
-    return gfx_later_queue(j);
+    SDL_LockMutex(gfx_laters.lock);
+    int64_t id = gfx_later_queue_locked(j);
+    SDL_UnlockMutex(gfx_laters.lock);
+    return id;
 }
 
 int64_t gs_gfx_image_size_state(int64_t job) {
@@ -1403,10 +1522,18 @@ int64_t gs_gfx_image_size_state(int64_t job) {
     if (!j) return -1;
     if (j == GFX_LATER_BUSY) return 0;
     int64_t r = -1;
-    if (!j->size_only) gfx_fail("image_size_state: job %lld is a picture's, not a size", (long long)job);
-    else if (j->state == 3) gfx_fail("%s", j->why);
-    else r = (int64_t)j->w * 65536 + j->h;
-    if (j->px) gfx_free_pages(j->px, j->bytes);
+    if (!j->size_only) {
+        gfx_fail("image_size_state: job %lld is a picture's, not a size", (long long)job);
+        /* its ring buffer back, its pixels unused */
+        SDL_LockMutex(gfx_laters.lock);
+        if (j->slot >= 0) gfx_laters.ring[j->slot].job = NULL;
+        SDL_BroadcastCondition(gfx_laters.wake);
+        SDL_UnlockMutex(gfx_laters.lock);
+    } else if (j->state == 3) {
+        gfx_fail("%s", j->why);
+    } else {
+        r = (int64_t)j->w * 65536 + j->h;
+    }
     free(j);
     return r;
 }
@@ -1419,11 +1546,19 @@ int32_t gs_gfx_image_later_state(int64_t job) {
     int32_t state = 1;
     if (j->size_only) {
         gfx_fail("%s: job %lld is a size's, not a picture's", what, (long long)job);
-        state = -1;
-    } else if (j->state == 3) {
+        free(j);
+        return -1;
+    }
+    SDL_LockMutex(gfx_laters.lock);
+    gfx_ring_buf *rb = &gfx_laters.ring[j->slot];
+    if (j->state == 3) {
         gfx_fail("%s", j->why);
         state = -1;
     } else {
+        /* the buffer unmapped and its copy recorded, in order with the frame's
+           work; then mapped again (cycled) for the next picture */
+        SDL_UnmapGPUTransferBuffer(gfx.dev, rb->tb);
+        rb->p = NULL;
         gfx_texture_slot *s = gfx_need_device(what) ? gfx_texture_slot_of(j->t) : NULL;
         gs_gfx_region r = { 0 };
         r.x = j->x - j->border;
@@ -1431,13 +1566,36 @@ int32_t gs_gfx_image_later_state(int64_t job) {
         r.w = j->w + 2 * j->border;
         r.h = j->h + 2 * j->border;
         SDL_GPUTextureRegion reg;
-        if (!s || !gfx_region(s, &r, &reg, what) ||
-            !gfx_upload_texture(&reg, s->format, j->px, (uint32_t)j->bytes, false, what))
+        SDL_GPUCommandBuffer *cb = NULL;
+        if (!s || !gfx_region(s, &r, &reg, what) || !(cb = gfx_copy_cmd(false, what))) {
             state = -1;
+        } else {
+            SDL_GPUCopyPass *cp = SDL_BeginGPUCopyPass(cb);
+            SDL_GPUTextureTransferInfo src;
+            SDL_zero(src);
+            src.transfer_buffer = rb->tb;
+            gfx_transfer_layout(&src, &reg, s->format);
+            SDL_UploadToGPUTexture(cp, &src, &reg, false);
+            SDL_EndGPUCopyPass(cp);
+            if (!gfx_copy_done(cb, false)) state = -1;
+        }
     }
-    if (j->px) gfx_free_pages(j->px, j->bytes);
+    rb->job = NULL;
+    if (!gfx_ring_ready(j->slot) && state == 1) state = -1;
+    SDL_BroadcastCondition(gfx_laters.wake);
+    SDL_UnlockMutex(gfx_laters.lock);
     free(j);
     return state;
+}
+
+void gs_gfx_image_later_release(void) {
+    if (!gfx_laters.lock || !gfx.dev) return;
+    SDL_LockMutex(gfx_laters.lock);
+    /* not while a picture is still to come: it needs a buffer */
+    bool pending = false;
+    for (gfx_later *j = gfx_laters.jobs; j; j = j->next) pending |= !j->size_only;
+    if (!pending) gfx_ring_drop();
+    SDL_UnlockMutex(gfx_laters.lock);
 }
 
 void gfx_release_resources(void) {

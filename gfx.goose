@@ -751,16 +751,21 @@ fn update_texture(t: Texture, data: const u8[:]) -> bool { update_texture(t, Reg
 // A WebP file of w x h decoded on one of the package's loading threads and put
 // into mip 0 of the RGBA8 texture t at x, y, its edge pixels repeated border
 // px round it (so a linear sampler at its edge reads only the picture): the
-// job, or 0 with error() set. Nothing is decoded on this thread; the pixels go
-// in when image_later_state finds them decoded.
+// job, or 0 with error() set. Nothing is decoded or read on this thread; the
+// pixels go in when image_later_state finds them decoded.
 extern "gs_gfx_load_image_later" fn load_image_later(path: const u8[:], t: Texture, x: i32, y: i32,
                                                      w: i32, h: i32, border: i32) -> i64;
 // Job's state, on the program's thread: 0 still decoding; 1 its pixels are in
 // its texture (an upload in order with the frame's work, not inside a pass);
 // -1 it failed (no such file, not a WebP of the size asked, no such job), and
 // error() says why. A job is done once this gives 1 or -1. close() drops the
-// jobs still to come.
+// jobs still to come. The pictures are decoded straight into a ring of 4
+// upload buffers, each as large as the largest picture asked for, made once
+// and reused: no copy or allocation on this thread for a picture.
 extern "gs_gfx_image_later_state" fn image_later_state(job: i64) -> i32;
+// Lets the ring of upload buffers go (a batch of pictures is in); the next
+// load_image_later makes it again. Nothing while a picture is still to come.
+extern "gs_gfx_image_later_release" fn image_later_release();
 // A WebP file's width and height, read from its header on the same loading
 // threads (no pixels, no file opened on this thread): the job, or 0 with
 // error() set.

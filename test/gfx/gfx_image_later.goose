@@ -4,7 +4,9 @@
 // texel out on each side (the corners too) and nothing else may change. Then
 // a wrong size, a missing file and a job that is not one fail, with the reason.
 // image_size_later reads the size of each kind of WebP (lossless VP8L, lossy
-// VP8, and VP8X: lossy with alpha) and fails on a missing file.
+// VP8, and VP8X: lossy with alpha) and fails on a missing file. Six pictures
+// at once go through the ring of four upload buffers, and one more after the
+// ring is let go.
 import gfx from "../..";
 import std;
 import os;
@@ -70,6 +72,17 @@ fn main() {
         if r > 0 { write_stdout(str("size: ", r / 65536, " x ", r % 65536, "\n")); }
         else { write_stdout(str("size: ", r, ", ", starts_with(gfx::error(), "cannot load test/gfx/no-such-picture.webp"), "\n")); }
     }
+    // more pictures at once than the ring has buffers, each in, then the ring
+    // let go and made again for one more
+    var many: i64[>..] = [];
+    for k in 6 { many.push(gfx::load_image_later(PATH, t, 2, 2, 3, 2, 1)); }
+    var ins = 0;
+    for m in many { if settle(m) == 1 { ins++; } }
+    write_stdout(str("six at once: ", ins, " in\n"));
+    gfx::image_later_release();
+    write_stdout(str("after the release: ", settle(gfx::load_image_later(PATH, t, 2, 2, 3, 2, 1)), "\n"));
+    gfx::image_later_release();
+    grid(gfx::read_pixels(t), 7, 6);
     let picture = gfx::load_image_later(PATH, t, 2, 2, 3, 2, 1);
     let t1 = clock();
     var r: i64 = 0;
