@@ -318,6 +318,8 @@ bool gfx_shader_code(gs_gfx_bytes blob, const gs_gfx_blob_header *h, void **code
                      const char **entry);
 
 void gfx_release_resources(void);
+/* The picture loading threads stopped and their jobs dropped (gs_gfx_close). */
+void gfx_later_stop(void);
 void gfx_release_pipelines(void);
 
 #endif

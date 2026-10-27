@@ -741,6 +741,7 @@ uint8_t gs_gfx_open_headless(int64_t width, int64_t height, int64_t flags) {
 }
 
 void gs_gfx_close(void) {
+    gfx_later_stop();
     if (gfx.dev) {
         if (gfx.pass) SDL_EndGPURenderPass(gfx.pass);
         if (gfx.cpass) SDL_EndGPUComputePass(gfx.cpass);

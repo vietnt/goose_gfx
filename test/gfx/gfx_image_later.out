@@ -1,0 +1,17 @@
+queued: true
+state: 1
+.......
+.00122.
+.00122.
+.33455.
+.33455.
+.......
+wrong size: -1, true
+missing: -1, true
+done job: -1, image_later_state: no job 1
+.......
+.00122.
+.00122.
+.33455.
+.33455.
+.......

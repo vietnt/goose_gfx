@@ -1148,6 +1148,215 @@ static void gfx_free_sampler(void *item) {
 
 static void gfx_free_readback(void *item) { gfx_readback_free((gfx_readback_slot *)item); }
 
+/* --- pictures decoded later ------------------------------------------------- */
+/* load_image_later queues a WebP file for the package's loading threads, which
+   decode it into pages of its own with its edge pixels repeated border px
+   round it (so a linear sampler at the picture's edge reads only the picture);
+   image_later_state, on the program's thread, uploads a decoded one into its
+   texture's rect and frees its pixels. Only that upload (a copy into a
+   transfer buffer, then a copy pass in order with the frame's work) is on the
+   program's thread, so a frame that asks for pictures does not decode them. */
+#define GFX_LOADERS 2
+typedef struct gfx_later {
+    struct gfx_later *next;
+    int64_t id;
+    char path[1024];
+    gs_gfx_texture t;
+    int32_t x, y, w, h, border;
+    int state;    /* 0 queued, 1 decoding, 2 decoded, 3 failed */
+    uint8_t *px;  /* (w + 2 border) x (h + 2 border) RGBA rows, from gfx_pages */
+    size_t bytes;
+    char why[1280];
+} gfx_later;
+
+static struct {
+    SDL_Mutex *lock;
+    SDL_Condition *wake;
+    SDL_Thread *threads[GFX_LOADERS];
+    gfx_later *jobs;  /* every job not yet taken by image_later_state, oldest first */
+    int64_t next_id;  /* never reset: a job's number is never another's */
+    bool quit;
+} gfx_laters;
+
+/* The picture at path, w x h, decoded with its edge pixels border px round it;
+   NULL with why set. Any thread. */
+static uint8_t *gfx_decode_bordered(const char *path, int32_t w, int32_t h, int32_t b,
+                                    size_t *bytes_out, char *why, size_t n) {
+    size_t size = 0;
+    void *file = SDL_LoadFile(path, &size);
+    if (!file) {
+        snprintf(why, n, "cannot load %s: %s", path, SDL_GetError());
+        return NULL;
+    }
+    uint8_t *px = NULL;
+    int fw = 0, fh = 0;
+    if (!WebPGetInfo((const uint8_t *)file, size, &fw, &fh)) {
+        snprintf(why, n, "cannot load %s: not a WebP image", path);
+    } else if (fw != w || fh != h) {
+        snprintf(why, n, "%s is %d x %d, not %d x %d", path, fw, fh, w, h);
+    } else {
+        size_t stride = (size_t)(w + 2 * b) * 4, rows = (size_t)(h + 2 * b);
+        size_t bytes = stride * rows, at = stride * (size_t)b + (size_t)b * 4;
+        px = (uint8_t *)gfx_pages(bytes);
+        if (!px) {
+            snprintf(why, n, "cannot load %s: out of memory", path);
+        } else if (!WebPDecodeRGBAInto((const uint8_t *)file, size, px + at, bytes - at, (int)stride)) {
+            snprintf(why, n, "cannot load %s: not a WebP image", path);
+            gfx_free_pages(px, bytes);
+            px = NULL;
+        } else {
+            /* each row's first and last pixels out to the sides, then the first
+               and last rows whole (the corners with them) above and below */
+            for (int32_t y = b; y < b + h; y++) {
+                uint8_t *row = px + stride * (size_t)y;
+                for (int32_t k = 0; k < b; k++) {
+                    memcpy(row + (size_t)k * 4, row + (size_t)b * 4, 4);
+                    memcpy(row + (size_t)(b + w + k) * 4, row + (size_t)(b + w - 1) * 4, 4);
+                }
+            }
+            for (int32_t k = 0; k < b; k++) {
+                memcpy(px + stride * (size_t)k, px + stride * (size_t)b, stride);
+                memcpy(px + stride * (size_t)(b + h + k), px + stride * (size_t)(b + h - 1), stride);
+            }
+            *bytes_out = bytes;
+        }
+    }
+    SDL_free(file);
+    return px;
+}
+
+static int SDLCALL gfx_later_loader(void *user) {
+    (void)user;
+    for (;;) {
+        SDL_LockMutex(gfx_laters.lock);
+        gfx_later *j = NULL;
+        while (!gfx_laters.quit) {
+            for (j = gfx_laters.jobs; j && j->state != 0; j = j->next) {}
+            if (j) break;
+            SDL_WaitCondition(gfx_laters.wake, gfx_laters.lock);
+        }
+        if (gfx_laters.quit) {
+            SDL_UnlockMutex(gfx_laters.lock);
+            return 0;
+        }
+        /* the job stays in the list, owned by this thread, until it is marked
+           decoded: only image_later_state takes a job out, and only then */
+        j->state = 1;
+        SDL_UnlockMutex(gfx_laters.lock);
+        size_t bytes = 0;
+        char why[sizeof j->why];
+        why[0] = 0;
+        uint8_t *px = gfx_decode_bordered(j->path, j->w, j->h, j->border, &bytes, why, sizeof why);
+        SDL_LockMutex(gfx_laters.lock);
+        j->px = px;
+        j->bytes = bytes;
+        memcpy(j->why, why, sizeof why);
+        j->state = px ? 2 : 3;
+        SDL_UnlockMutex(gfx_laters.lock);
+        gs_gfx_wake();
+    }
+}
+
+/* The loading threads stopped and every job dropped (gs_gfx_close). */
+void gfx_later_stop(void) {
+    if (!gfx_laters.lock) return;
+    SDL_LockMutex(gfx_laters.lock);
+    gfx_laters.quit = true;
+    SDL_BroadcastCondition(gfx_laters.wake);
+    SDL_UnlockMutex(gfx_laters.lock);
+    for (int i = 0; i < GFX_LOADERS; i++) {
+        if (gfx_laters.threads[i]) SDL_WaitThread(gfx_laters.threads[i], NULL);
+        gfx_laters.threads[i] = NULL;
+    }
+    while (gfx_laters.jobs) {
+        gfx_later *next = gfx_laters.jobs->next;
+        if (gfx_laters.jobs->px) gfx_free_pages(gfx_laters.jobs->px, gfx_laters.jobs->bytes);
+        free(gfx_laters.jobs);
+        gfx_laters.jobs = next;
+    }
+    gfx_laters.quit = false;
+}
+
+int64_t gs_gfx_load_image_later(gs_gfx_bytes path, gs_gfx_texture t, int32_t x, int32_t y, int32_t w,
+                                int32_t h, int32_t border) {
+    const char *what = "load_image_later";
+    if (!gfx_need_device(what)) return 0;
+    gfx_texture_slot *s = gfx_texture_slot_of(t);
+    if (!s) return 0;
+    if (s->format != SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM && s->format != SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM_SRGB)
+        return gfx_misuse("%s: an RGBA8 texture is needed", what), 0;
+    if (w <= 0 || h <= 0 || border < 0)
+        return gfx_misuse("%s: a %d x %d picture with a border of %d", what, w, h, border), 0;
+    gs_gfx_region r = { 0 };
+    r.x = x - border;
+    r.y = y - border;
+    r.w = w + 2 * border;
+    r.h = h + 2 * border;
+    SDL_GPUTextureRegion reg;
+    if (!gfx_region(s, &r, &reg, what)) return 0;
+    if (path.len <= 0 || (size_t)path.len >= sizeof ((gfx_later *)0)->path)
+        return gfx_fail("%s: a path of %lld bytes", what, (long long)path.len), 0;
+    if (!gfx_laters.lock && !(gfx_laters.lock = SDL_CreateMutex())) return gfx_sdl_fail(what), 0;
+    if (!gfx_laters.wake && !(gfx_laters.wake = SDL_CreateCondition())) return gfx_sdl_fail(what), 0;
+    for (int i = 0; i < GFX_LOADERS; i++)
+        if (!gfx_laters.threads[i] &&
+            !(gfx_laters.threads[i] = SDL_CreateThread(gfx_later_loader, "goose gfx loader", NULL)))
+            return gfx_sdl_fail(what), 0;
+    gfx_later *j = (gfx_later *)calloc(1, sizeof *j);
+    if (!j) return gfx_fail("%s: out of memory", what), 0;
+    memcpy(j->path, path.data, (size_t)path.len);
+    j->t = t;
+    j->x = x;
+    j->y = y;
+    j->w = w;
+    j->h = h;
+    j->border = border;
+    SDL_LockMutex(gfx_laters.lock);
+    j->id = ++gfx_laters.next_id;
+    gfx_later **end = &gfx_laters.jobs;
+    while (*end) end = &(*end)->next;
+    *end = j;
+    SDL_SignalCondition(gfx_laters.wake);
+    SDL_UnlockMutex(gfx_laters.lock);
+    return j->id;
+}
+
+int32_t gs_gfx_image_later_state(int64_t job) {
+    const char *what = "image_later_state";
+    gfx_later *j = NULL, **at = NULL;
+    if (gfx_laters.lock) {
+        SDL_LockMutex(gfx_laters.lock);
+        for (at = &gfx_laters.jobs; (j = *at) != NULL; at = &j->next)
+            if (j->id == job) break;
+        if (j && j->state < 2) {
+            SDL_UnlockMutex(gfx_laters.lock);
+            return 0;
+        }
+        if (j) *at = j->next;
+        SDL_UnlockMutex(gfx_laters.lock);
+    }
+    if (!j) return gfx_fail("%s: no job %lld", what, (long long)job), -1;
+    int32_t state = 1;
+    if (j->state == 3) {
+        gfx_fail("%s", j->why);
+        state = -1;
+    } else {
+        gfx_texture_slot *s = gfx_need_device(what) ? gfx_texture_slot_of(j->t) : NULL;
+        gs_gfx_region r = { 0 };
+        r.x = j->x - j->border;
+        r.y = j->y - j->border;
+        r.w = j->w + 2 * j->border;
+        r.h = j->h + 2 * j->border;
+        SDL_GPUTextureRegion reg;
+        if (!s || !gfx_region(s, &r, &reg, what) ||
+            !gfx_upload_texture(&reg, s->format, j->px, (uint32_t)j->bytes, false, what))
+            state = -1;
+    }
+    if (j->px) gfx_free_pages(j->px, j->bytes);
+    free(j);
+    return state;
+}
+
 void gfx_release_resources(void) {
     gfx_table_each(&gfx.buffers, gfx_free_buffer);
     gfx_table_each(&gfx.textures, gfx_free_texture);
