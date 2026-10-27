@@ -15,3 +15,8 @@ done job: -1, image_later_state: no job 1
 .33455.
 .33455.
 .......
+size: 3 x 2
+size: 37 x 23
+size: 41 x 19
+size: -1, true
+a picture's job as a size: -1, image_size_state: job 8 is a picture's, not a size

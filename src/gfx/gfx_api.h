@@ -206,6 +206,8 @@ typedef struct {
     X(uint8_t, gs_gfx_update_texture, (gs_gfx_texture t, const gs_gfx_region *region, gs_gfx_bytes data)) \
     X(int64_t, gs_gfx_load_image_later, (gs_gfx_bytes path, gs_gfx_texture t, int32_t x, int32_t y, int32_t w, int32_t h, int32_t border)) \
     X(int32_t, gs_gfx_image_later_state, (int64_t job)) \
+    X(int64_t, gs_gfx_image_size_later, (gs_gfx_bytes path)) \
+    X(int64_t, gs_gfx_image_size_state, (int64_t job)) \
     X(uint8_t, gs_gfx_copy_buffer_to_texture, (gs_gfx_buffer b, int64_t offset, gs_gfx_texture t, const gs_gfx_region *region)) \
     X(uint8_t, gs_gfx_copy_texture, (gs_gfx_texture src, const gs_gfx_region *from, gs_gfx_texture dst, const gs_gfx_region *to)) \
     X(uint8_t, gs_gfx_read_texture, (gs_gfx_texture t, const gs_gfx_region *region, gs_gfx_bytes out)) \

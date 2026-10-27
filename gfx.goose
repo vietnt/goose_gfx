@@ -761,6 +761,14 @@ extern "gs_gfx_load_image_later" fn load_image_later(path: const u8[:], t: Textu
 // error() says why. A job is done once this gives 1 or -1. close() drops the
 // jobs still to come.
 extern "gs_gfx_image_later_state" fn image_later_state(job: i64) -> i32;
+// A WebP file's width and height, read from its header on the same loading
+// threads (no pixels, no file opened on this thread): the job, or 0 with
+// error() set.
+extern "gs_gfx_image_size_later" fn image_size_later(path: const u8[:]) -> i64;
+// Job's answer: 0 still reading; once read, w * 65536 + h; -1 it failed (no
+// such file, not a WebP, no such job), and error() says why. A job is done
+// once this gives anything but 0.
+extern "gs_gfx_image_size_state" fn image_size_state(job: i64) -> i64;
 // Copies into `region` of `t` the bytes of `b` from `offset` on, laid out as
 // update_texture takes them, on the GPU and in order with the work recorded
 // around it, as when a compute pass has written the buffer. Not inside a
