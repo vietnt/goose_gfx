@@ -56,6 +56,33 @@ int main(void) {
     CHECK(gs_audio_open(48000, 1) && gs_audio_volume() == 1);
     gs_audio_close();
 
+    // A voice played at a frame of the mixer's clock starts on that frame, inside a block. The clock
+    // counts the frames mixed while playing, so a pause holds it and the voices waiting on it; one
+    // whose frame has passed starts at once.
+    {
+        CHECK(gs_audio_open(48000, 1) && gs_audio_clock() == 0);
+        float half[4] = { 0.5f, 0.5f, 0.5f, 0.5f }, out[16];
+        gs_audio_sound s = gs_audio_create_sound((gs_audio_f32_slice){ half, 4 }, 48000, 1);
+        CHECK(s.id && gs_audio_render((gs_audio_f32_slice){ out, 4 }) && gs_audio_clock() == 2);
+        gs_audio_voice v = gs_audio_play_at(s, 1, 0, 1, 0, 5);
+        CHECK(v.id && gs_audio_playing(v));
+        CHECK(gs_audio_render((gs_audio_f32_slice){ out, 16 }) && gs_audio_clock() == 10);
+        for (int f = 0; f < 8; ++f) CHECK(out[2 * f] == (f + 2 >= 5 && f + 2 < 9 ? 0.5f : 0));
+        CHECK(!gs_audio_playing(v));
+        v = gs_audio_play_at(s, 1, 0, 1, 0, 12);
+        gs_audio_set_paused(1);
+        CHECK(gs_audio_render((gs_audio_f32_slice){ out, 16 }) && gs_audio_clock() == 10 && gs_audio_playing(v));
+        gs_audio_set_paused(0);
+        CHECK(gs_audio_render((gs_audio_f32_slice){ out, 4 }) && gs_audio_clock() == 12 && out[0] == 0 && out[2] == 0);
+        CHECK(gs_audio_render((gs_audio_f32_slice){ out, 2 }) && out[0] == 0.5f);
+        gs_audio_stop_all();
+        v = gs_audio_play_at(s, 1, 0, 1, 0, 3);
+        CHECK(v.id && gs_audio_render((gs_audio_f32_slice){ out, 2 }) && out[0] == 0.5f);
+        gs_audio_close();
+        CHECK(gs_audio_open(48000, 1) && gs_audio_clock() == 0);
+        gs_audio_close();
+    }
+
     // A sound loaded later (on the loading thread) is the sound loaded at once, filtered or not;
     // a voice played and seeked while it loads waits silent at its place and plays from there
     // once it lands. A file that isn't there becomes gone with its reason; releasing or closing
@@ -85,6 +112,23 @@ int main(void) {
             CHECK(peak > 0.1f);
             gs_audio_close();
         }
+        // played at a frame while its sound loads, a voice starts on that frame once it has landed
+        static float at_pcm[4096];
+        CHECK(gs_audio_open(48000, 1));
+        gs_audio_sound at_later = gs_audio_load_sound_later(path, 0.05, 0.3, 0, 0);
+        gs_audio_voice at_v = gs_audio_play_at(at_later, 1, 0, 1, 0, 1000);
+        CHECK(at_v.id && gs_audio_playing(at_v));
+        Uint64 at_deadline = SDL_GetTicks() + 3000;
+        while (gs_audio_sound_state(at_later) == GS_AUDIO_SOUND_LOADING && SDL_GetTicks() < at_deadline) SDL_Delay(1);
+        CHECK(gs_audio_clock() == 0 && gs_audio_render((gs_audio_f32_slice){ at_pcm, 4096 }));
+        gs_audio_close();
+        CHECK(gs_audio_open(48000, 1));
+        gs_audio_sound at_now = gs_audio_load_sound_lowpass(path, 0.05, 0.3, 0, 0);
+        CHECK(gs_audio_play(at_now, 1, 0, 1, 0).id && gs_audio_render((gs_audio_f32_slice){ now_pcm, 4096 }));
+        gs_audio_close();
+        for (int i = 0; i < 2000; ++i) CHECK(at_pcm[i] == 0);
+        CHECK(memcmp(at_pcm + 2000, now_pcm, (4096 - 2000) * sizeof(float)) == 0);
+
         CHECK(gs_audio_open(48000, 1));
         gs_audio_bytes nowhere = { (uint8_t *)"no/such/sound.mp3", 17 };
         gs_audio_sound missing = gs_audio_load_sound_later(nowhere, 0, 0, 0, 0);

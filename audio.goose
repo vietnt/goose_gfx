@@ -94,6 +94,21 @@ fn play(sound: Sound, volume: f32 = 1.0, pan: f32 = 0.0,
     play_raw(sound, volume, pan, pitch, looping)
 }
 
+// The mixer's clock: the frames it has mixed while playing (not paused) since it opened. A device
+// mixes a block or so ahead of what it plays, so the clock runs that far ahead of what is heard.
+extern "gs_audio_clock" fn clock() -> i64;
+
+// play, starting on the clock's frame `at` instead of the next block: the voice waits silent (and
+// playing) until the mixer reaches that frame and starts on it, inside its block, so voices played
+// at frames of one clock keep their distances to the frame. One whose frame has passed starts at
+// once; a pause holds the clock and the voices waiting on it.
+extern "gs_audio_play_at" fn play_at_raw(sound: Sound, volume: f32, pan: f32,
+                                         pitch: f32, looping: bool, at: i64) -> Voice;
+fn play_at(sound: Sound, at: i64, volume: f32 = 1.0, pan: f32 = 0.0,
+           pitch: f32 = 1.0, looping: bool = false) -> Voice {
+    play_at_raw(sound, volume, pan, pitch, looping, at)
+}
+
 // Completed/stopped/stale/zero voices are not playing; stop is a no-op.
 // Device buffers can still contain a little already mixed sound after stop.
 extern "gs_audio_playing" fn playing(voice: Voice) -> bool;

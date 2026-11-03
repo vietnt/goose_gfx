@@ -38,11 +38,13 @@ typedef struct {
     float volume, pan, pitch;
     bool loop;
     double seek;  /* seconds a seek asked for while its sound loaded (-1: none) */
+    int64_t start;  /* the clock's frame it starts on; silent until then */
 } audio_voice;
 
 static struct {
     bool open, offline;
     bool paused;   /* every voice held where it is; the output silent */
+    int64_t clock; /* the frames mixed while playing (not paused) since the mixer opened */
     float volume;  /* the master volume, applied after the voices are mixed */
     int rate;
     SDL_AudioStream *stream;
@@ -117,6 +119,10 @@ static void audio_mix(float *out, int64_t frames) {
         // A voice on a sound still loading waits at its place; one seeked past the end of what
         // landed wraps or ends, as a seek would have.
         if (!sound->samples) continue;
+        // A voice played at a frame still to come waits silent, and starts on it inside this block.
+        int64_t first = voice->start - audio.clock;
+        if (first >= frames) continue;
+        if (first < 0) first = 0;
         if (voice->seek >= 0) { voice->position = voice->seek * sound->rate; voice->seek = -1; }
         if (voice->position >= sound->frames) {
             if (voice->loop) voice->position = fmod(voice->position, (double)sound->frames);
@@ -125,7 +131,7 @@ static void audio_mix(float *out, int64_t frames) {
         double step = (double)sound->rate / audio.rate * voice->pitch;
         float left = voice->volume * (voice->pan > 0 ? 1 - voice->pan : 1);
         float right = voice->volume * (voice->pan < 0 ? 1 + voice->pan : 1);
-        for (int64_t f = 0; f < frames; ++f) {
+        for (int64_t f = first; f < frames; ++f) {
             int64_t a = (int64_t)voice->position;
             int64_t b = a + 1;
             if (b == sound->frames) b = voice->loop ? 0 : a;
@@ -149,6 +155,7 @@ static void audio_mix(float *out, int64_t frames) {
         if (out[i] > 1) out[i] = 1;
         if (out[i] < -1) out[i] = -1;
     }
+    audio.clock += frames;
 }
 
 static void SDLCALL audio_callback(void *userdata, SDL_AudioStream *stream,
@@ -185,6 +192,7 @@ uint8_t gs_audio_open(int64_t sample_rate, uint8_t offline) {
     audio.offline = offline != 0;
     audio.paused = false;
     audio.volume = 1;
+    audio.clock = 0;
     if (offline) { audio.open = true; return 1; }
     if (!SDL_InitSubSystem(SDL_INIT_AUDIO)) return audio_sdl_fail();
     SDL_AudioSpec spec = { SDL_AUDIO_F32, 2, (int)sample_rate };
@@ -505,6 +513,18 @@ uint8_t gs_audio_release_sound(gs_audio_sound sound) {
 
 gs_audio_voice gs_audio_play(gs_audio_sound sound, float volume, float pan,
                              float pitch, uint8_t loop) {
+    return gs_audio_play_at(sound, volume, pan, pitch, loop, 0);
+}
+
+int64_t gs_audio_clock(void) {
+    audio_lock();
+    int64_t clock = audio.clock;
+    audio_unlock();
+    return clock;
+}
+
+gs_audio_voice gs_audio_play_at(gs_audio_sound sound, float volume, float pan,
+                                float pitch, uint8_t loop, int64_t at) {
     gs_audio_voice result = { 0 };
     audio_lock();
     audio_sound *source = audio_find_sound(sound);
@@ -516,7 +536,7 @@ gs_audio_voice gs_audio_play(gs_audio_sound sound, float volume, float pan,
         else {
             result.id = audio_id();
             if (result.id)
-                *slot = (audio_voice){ result.id, source, 0, volume, pan, pitch, loop != 0, -1 };
+                *slot = (audio_voice){ result.id, source, 0, volume, pan, pitch, loop != 0, -1, at };
         }
     }
     audio_unlock();

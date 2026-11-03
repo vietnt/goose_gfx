@@ -35,6 +35,8 @@ GS_AUDIO_CONSTANTS(GS_AUDIO_CONST)
     X(int32_t, gs_audio_sound_state, (gs_audio_sound sound)) \
     X(uint8_t, gs_audio_release_sound, (gs_audio_sound sound)) \
     X(gs_audio_voice, gs_audio_play, (gs_audio_sound sound, float volume, float pan, float pitch, uint8_t loop)) \
+    X(gs_audio_voice, gs_audio_play_at, (gs_audio_sound sound, float volume, float pan, float pitch, uint8_t loop, int64_t at)) \
+    X(int64_t, gs_audio_clock, (void)) \
     X(uint8_t, gs_audio_playing, (gs_audio_voice voice)) \
     X(void, gs_audio_stop, (gs_audio_voice voice)) \
     X(void, gs_audio_stop_all, (void)) \
