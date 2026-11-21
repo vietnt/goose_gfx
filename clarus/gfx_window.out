@@ -1,0 +1,7 @@
+screen 64 x 48 at a whole scale: true
+first frame: running true
+focus: hidden false, injected true
+space: down true, pressed true; button 1: down true, pressed true; mouse at 10,20
+events: key down button 1 down text 111 text 107
+released: space down false, button 1 down false, released true
+screenshot true

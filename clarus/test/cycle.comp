@@ -1,0 +1,9 @@
+layout(local_size_x = 4) in;
+layout(set = 1, binding = 0, rgba8) uniform writeonly image2D field;
+layout(std430, set = 1, binding = 1) buffer Counts { uint counts[]; };
+layout(set = 2, binding = 0) uniform Value { uint v; };
+void main() {
+    uint x = gl_GlobalInvocationID.x;
+    imageStore(field, ivec2(x, 0), vec4(float(v), float(x), 0.0, 255.0) / 255.0);
+    counts[x] = v * 100u + x;
+}

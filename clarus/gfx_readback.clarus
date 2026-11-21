@@ -1,0 +1,130 @@
+// test/gfx/gfx_readback.goose in Clarus: read backs that do not wait. Each gives what the resource held where it was
+// asked for, in program order; ready() is false until it is submitted; several share one submit and are taken in any
+// order; one not submitted yet is submitted by the take; the source can be released before the take; and reading
+// depth this way leaves the uniforms the program pushed as they were. It prints test/gfx/gfx_readback.out.
+
+import gfx
+import shaders
+
+fn texels(px: Slice<u8>) {
+	for i in 0..px.len() / 4 {
+		if i > 0 { print(" ") }
+		print("{},{},{},{}", px[i * 4], px[i * 4 + 1], px[i * 4 + 2], px[i * 4 + 3])
+	}
+	print("\n")
+}
+
+fn u32_at(b: Slice<u8>, i: i64) -> u32 {
+	return u32(b[4 * i]) | (u32(b[4 * i + 1]) << 8) | (u32(b[4 * i + 2]) << 16) | (u32(b[4 * i + 3]) << 24)
+}
+
+fn put(x: f32) {
+	if f32(i64(x)) == x { print("{}.0", i64(x)) } else { print("{}", x) }
+}
+
+fn clear(t: gfx.Texture, c: gfx.Float4) {
+	gfx.begin_pass_into(t, gfx.Texture { id: 0 }, c)
+	gfx.end_pass()
+}
+
+fn bytes4(xs: &[u32; 4]) -> Slice<u8> { return Unsafe.slice(Unsafe.cast(Unsafe.addr(xs[0])), 16) }
+
+fn main() -> i32 {
+	if !gfx.open_headless(8, 8) {
+		use why = gfx.error()
+		if let t = Text.from_utf8(why.all()) { eprint("gfx: {}\n", t) }
+		return 1
+	}
+	let all = gfx.Region { .. }
+	// Program order: cleared to one color, asked for, cleared to another, asked for again.
+	let target = gfx.render_target(2, 1, gfx.RGBA8)
+	clear(target, gfx.Float4 { x: 1.0, y: 0.0, z: 0.0, w: 1.0 })
+	let first = gfx.read_texture_async(target, all)
+	clear(target, gfx.Float4 { x: 0.0, y: 0.0, z: 1.0, w: 1.0 })
+	let right = gfx.Region { mip: 0, layer: 0, x: 1, y: 0, z: 0, w: 1, h: 1, d: 0 }
+	let second = gfx.read_texture_async(target, right)
+	print("before any submit: ready {} {}, sizes {} {}\n", gfx.ready(first), gfx.ready(second), gfx.readback_size(first), gfx.readback_size(second))
+	// Taken out of order; the second is still pending, so the take submits it.
+	use s = gfx.take_readback(second)
+	print("second, taken first: ")
+	texels(s.all())
+	print("first, ready after the second's take: {}\n", gfx.ready(first))
+	use f = gfx.take_readback(first)
+	print("first: ")
+	texels(f.all())
+
+	// A buffer: asked for, then overwritten; flush() submits it.
+	let values: [u32; 4] = [10, 20, 30, 40]
+	let buf = gfx.buffer(gfx.BUFFER_VERTEX, 16, bytes4(values))
+	let middle = gfx.read_buffer_async(buf, 4, 8)
+	let overwrite: [u32; 4] = [1, 2, 3, 4]
+	gfx.update_buffer(buf, 0, bytes4(overwrite))
+	print("buffer before flush: ready {}\n", gfx.ready(middle))
+	gfx.flush()
+	print("buffer after flush: ready {}\n", gfx.ready(middle))
+	use got = gfx.take_readback(middle)
+	print("buffer bytes 4 to 12 as asked for: {} {}\n", u32_at(got.all(), 0), u32_at(got.all(), 1))
+	let after = gfx.read_buffer_async(buf, 0, 16)
+	use now = gfx.take_readback(after)
+	print("buffer now: {} {} {} {}\n", u32_at(now.all(), 0), u32_at(now.all(), 1), u32_at(now.all(), 2), u32_at(now.all(), 3))
+
+	// Three from one submit, taken last to first, from a texture released before any of them is taken.
+	let doomed = gfx.render_target(3, 1, gfx.RGBA8)
+	clear(doomed, gfx.Float4 { x: 0.2, y: 0.4, z: 0.6, w: 1.0 })
+	var three = [gfx.Readback { id: 0 }; 3]
+	for i in 0..3 {
+		let one = gfx.Region { mip: 0, layer: 0, x: i32(i), y: 0, z: 0, w: 1, h: 1, d: 0 }
+		three[i] = gfx.read_texture_async(doomed, one)
+	}
+	gfx.release_texture(doomed)
+	gfx.frame()
+	for k in 0..3 {
+		let i = 2 - k
+		use px = gfx.take_readback(three[i])
+		print("pixel {} of a released texture: ", i)
+		texels(px.all())
+	}
+	let dropped = gfx.read_texture_async(target, all)
+	gfx.release_readback(dropped)
+
+	// Depth read this way, between two draws of a pipeline whose fragment uniforms are pushed only before the
+	// first: the second must still have them.
+	var desc = gfx.pipeline_desc()
+	desc.depth_test = 1
+	desc.depth_write = 1
+	let draw_rect = gfx.pipeline(shaders.rect_vert(), shaders.color_frag(), desc)
+	let color_a = gfx.render_target(2, 1, gfx.RGBA8)
+	let color_b = gfx.render_target(2, 1, gfx.RGBA8)
+	let depth = gfx.texture2d(2, 1, gfx.DEPTH32F, gfx.DEPTH_TARGET)
+	var pass = gfx.pass_desc()
+	pass.depth = depth
+	pass.color[0] = color_a
+	gfx.begin_pass(pass)
+	gfx.bind_pipeline(draw_rect)
+	let color: [f32; 4] = [0.2, 0.6, 1.0, 1.0]
+	gfx.uniforms(gfx.FRAGMENT, 0, Unsafe.slice(Unsafe.cast(Unsafe.addr(color[0])), 16))
+	let rect: [f32; 8] = [0.0, 0.0, 1.0, 1.0, 0.25, 2.0, 1.0, 0.0]
+	gfx.uniforms(gfx.VERTEX, 0, Unsafe.slice(Unsafe.cast(Unsafe.addr(rect[0])), 32))
+	gfx.draw(6)
+	gfx.end_pass()
+	let depths = gfx.read_texture_async(depth, all)
+	gfx.begin_pass_into(color_b, gfx.Texture { id: 0 }, gfx.Float4 { x: 0.0, y: 0.0, z: 0.0, w: 0.0 })
+	let plain = gfx.pipeline_desc()
+	gfx.bind_pipeline(gfx.pipeline(shaders.rect_vert(), shaders.color_frag(), plain))
+	gfx.draw(6)
+	gfx.end_pass()
+	use z = gfx.take_readback(depths)
+	print("depth: ")
+	put(f32.from_bits(u32_at(z.all(), 0)))
+	print(" ")
+	put(f32.from_bits(u32_at(z.all(), 1)))
+	print("\n")
+	use a = gfx.read_pixels(color_a)
+	print("drawn before the depth read: ")
+	texels(a.all())
+	use b = gfx.read_pixels(color_b)
+	print("drawn after it, uniforms not pushed again: ")
+	texels(b.all())
+	gfx.close()
+	return 0
+}

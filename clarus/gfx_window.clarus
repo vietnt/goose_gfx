@@ -1,0 +1,62 @@
+// A window on the desktop, not headless: opened hidden, a frame presented, and input read the way a game reads it,
+// from keys, a mouse button and typed text injected as the system would send them. It prints clarus/gfx_window.out
+// on any backend; it needs a display (native Windows or macOS), so no headless run checks it.
+
+import gfx
+
+fn main() -> i32 {
+	if !gfx.open("gfx_window", 64, 48, gfx.WINDOW_HIDDEN) {
+		use why = gfx.error()
+		if let t = Text.from_utf8(why.all()) { eprint("gfx: no window: {}\n", t) }
+		return 1
+	}
+	let size = gfx.screen_size()
+	// In pixels: 64 x 48 times the display's scale, 2 on a Retina Mac.
+	print("screen 64 x 48 at a whole scale: {}\n", size.x >= 64 && size.x % 64 == 0 && size.y * 64 == size.x * 48)
+
+	// One frame presented, cleared to a known color, then saved as the screen shows it.
+	gfx.begin_screen(gfx.Float4 { x: 1.0, y: 0.4, z: 0.2, w: 1.0 })
+	gfx.end_pass()
+	print("first frame: running {}\n", gfx.frame())
+
+	// A hidden window has no keyboard focus, so its input is ignored until focus comes, injected here as well.
+	let hidden = gfx.focused()
+	gfx.inject_focus(true)
+	gfx.begin_screen(gfx.Float4 { x: 1.0, y: 0.4, z: 0.2, w: 1.0 })
+	gfx.end_pass()
+	gfx.frame()
+	print("focus: hidden {}, injected {}\n", hidden, gfx.focused())
+
+	// Input injected before a frame is that frame's.
+	gfx.text_input(true)
+	gfx.inject_key("Space", true)
+	gfx.inject_mouse(10.0, 20.0, 1, true)
+	gfx.inject_text("ok")
+	gfx.begin_screen(gfx.Float4 { x: 1.0, y: 0.4, z: 0.2, w: 1.0 })
+	gfx.end_pass()
+	gfx.frame()
+	let p = gfx.mouse_pos()
+	print("space: down {}, pressed {}; button 1: down {}, pressed {}; mouse at {},{}\n", gfx.key_down("Space"), gfx.key_pressed("Space"), gfx.mouse_down(1), gfx.mouse_pressed(1), i64(p.x), i64(p.y))
+	use events = gfx.events()
+	print("events:")
+	for e in events.all() {
+		if e.kind == gfx.EVENT_KEY { print(" key {}", if e.down != 0 { "down" } else { "up" }) }
+		if e.kind == gfx.EVENT_MOUSE_BUTTON { print(" button {} {}", e.button, if e.down != 0 { "down" } else { "up" }) }
+		if e.kind == gfx.EVENT_TEXT { print(" text {}", e.codepoint) }
+	}
+	print("\n")
+
+	// Released: up the next frame, and no longer pressed.
+	gfx.inject_key("Space", false)
+	gfx.inject_mouse(10.0, 20.0, 1, false)
+	gfx.begin_screen(gfx.Float4 { x: 1.0, y: 0.4, z: 0.2, w: 1.0 })
+	gfx.end_pass()
+	gfx.frame()
+	print("released: space down {}, button 1 down {}, released {}\n", gfx.key_down("Space"), gfx.mouse_down(1), gfx.mouse_released(1))
+	gfx.begin_screen(gfx.Float4 { x: 1.0, y: 0.4, z: 0.2, w: 1.0 })
+	gfx.end_pass()
+	print("screenshot {}\n", gfx.screenshot("gfx_window.png"))
+	gfx.frame()
+	gfx.close()
+	return 0
+}

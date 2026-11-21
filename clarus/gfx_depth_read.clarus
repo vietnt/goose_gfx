@@ -1,0 +1,125 @@
+// test/gfx/gfx_depth_read.goose in Clarus: depth textures read back as one f32 a texel, rectangles drawn at known
+// depths into D32F (forward and reverse-Z), D16 and the screen's depth, read whole and by a region off the origin.
+// It prints test/gfx/gfx_depth_read.out.
+
+import gfx
+import shaders
+
+// Floats as Goose prints them: a whole number with ".0".
+fn put(x: f32) {
+	if f32(i64(x)) == x { print("{}.0", i64(x)) } else { print("{}", x) }
+}
+
+fn floats(xs: Slice<f32>, from: i64, to: i64) {
+	for i in from..to {
+		if i > from { print(" ") }
+		put(xs[i])
+	}
+}
+
+// The f32 texels of `region` of depth texture `t`, n of them.
+fn read_depth(t: gfx.Texture, region: &gfx.Region, n: i64) -> Array<f32> {
+	var raw = Array<u8>.filled(4 * n, 0)
+	gfx.read_texture(t, region, raw.all_mut())
+	var out = Array<f32>.filled(n, 0.0)
+	for i in 0..n {
+		out[i] = f32.from_bits(u32(raw[4 * i]) | (u32(raw[4 * i + 1]) << 8) | (u32(raw[4 * i + 2]) << 16) | (u32(raw[4 * i + 3]) << 24))
+	}
+	raw.dispose()
+	return out
+}
+
+fn rect(x0: f32, y0: f32, x1: f32, y1: f32, z: f32, w: f32, h: f32) {
+	let u: [f32; 8] = [x0, y0, x1, y1, z, w, h, 0.0]
+	gfx.uniforms(gfx.VERTEX, 0, Unsafe.slice(Unsafe.cast(Unsafe.addr(u[0])), 32))
+	gfx.draw(6)
+}
+
+fn depth_pass(d: gfx.Texture, clear: f32) {
+	var pass = gfx.pass_desc()
+	pass.depth = d
+	pass.depth_value = clear
+	gfx.begin_pass(pass)
+}
+
+fn depth_pipeline(compare: i32, fs: Ptr<const gfx.FragShader>) -> gfx.Pipeline {
+	var desc = gfx.pipeline_desc()
+	desc.depth_test = 1
+	desc.depth_write = 1
+	desc.depth_compare = compare
+	return gfx.pipeline(shaders.rect_vert(), fs, desc)
+}
+
+fn main() -> i32 {
+	if !gfx.open_headless(8, 8) {
+		use why = gfx.error()
+		if let t = Text.from_utf8(why.all()) { eprint("gfx: {}\n", t) }
+		return 1
+	}
+	// Depth targets alone take a shader with no color output; the screen, which has color, one with.
+	let less = depth_pipeline(gfx.COMPARE_LESS, shaders.depth_only_frag())
+	let greater = depth_pipeline(gfx.COMPARE_GREATER, shaders.depth_only_frag())
+	let on_screen = depth_pipeline(gfx.COMPARE_LESS, shaders.white_frag())
+	let all = gfx.Region { .. }
+
+	// D32F, cleared to 1: three rectangles nearer, the last row left alone.
+	let d32 = gfx.texture2d(4, 4, gfx.DEPTH32F, gfx.DEPTH_TARGET)
+	depth_pass(d32, 1.0)
+	gfx.bind_pipeline(less)
+	rect(0.0, 0.0, 2.0, 2.0, 0.25, 4.0, 4.0)
+	rect(2.0, 0.0, 4.0, 2.0, 0.5, 4.0, 4.0)
+	rect(0.0, 2.0, 4.0, 3.0, 0.75, 4.0, 4.0)
+	gfx.end_pass()
+	use whole = read_depth(d32, all, 16)
+	print("d32 rows: ")
+	floats(whole.all(), 0, 4)
+	print(" | ")
+	floats(whole.all(), 4, 8)
+	print(" | ")
+	floats(whole.all(), 8, 12)
+	print(" | ")
+	floats(whole.all(), 12, 16)
+	print("\n")
+	let at11 = gfx.Region { mip: 0, layer: 0, x: 1, y: 1, z: 0, w: 2, h: 2, d: 0 }
+	use part = read_depth(d32, at11, 4)
+	print("d32 2 x 2 at 1,1: ")
+	floats(part.all(), 0, 4)
+	print("\n")
+
+	// Reverse-Z: cleared to 0, the greater depth wins.
+	let rev = gfx.texture2d(2, 1, gfx.DEPTH32F, gfx.DEPTH_TARGET)
+	depth_pass(rev, 0.0)
+	gfx.bind_pipeline(greater)
+	rect(0.0, 0.0, 2.0, 1.0, 0.25, 2.0, 1.0)
+	rect(0.0, 0.0, 1.0, 1.0, 0.75, 2.0, 1.0)
+	rect(0.0, 0.0, 2.0, 1.0, 0.5, 2.0, 1.0)
+	gfx.end_pass()
+	use r = read_depth(rev, all, 2)
+	print("reverse-z: ")
+	floats(r.all(), 0, 2)
+	print("\n")
+
+	// D16: 0 and 1 are exact in 16 bits.
+	let d16 = gfx.texture2d(2, 1, gfx.DEPTH16, gfx.DEPTH_TARGET)
+	depth_pass(d16, 1.0)
+	gfx.bind_pipeline(less)
+	rect(0.0, 0.0, 1.0, 1.0, 0.0, 2.0, 1.0)
+	gfx.end_pass()
+	use s = read_depth(d16, all, 2)
+	print("d16: ")
+	floats(s.all(), 0, 2)
+	print("\n")
+
+	// The screen's depth, after drawing its left half at 0.5.
+	gfx.begin_screen(gfx.Float4 { x: 0.0, y: 0.0, z: 0.0, w: 1.0 })
+	gfx.bind_pipeline(on_screen)
+	rect(0.0, 0.0, 4.0, 8.0, 0.5, 8.0, 8.0)
+	gfx.end_pass()
+	let at35 = gfx.Region { mip: 0, layer: 0, x: 3, y: 5, z: 0, w: 2, h: 1, d: 0 }
+	use sd = read_depth(gfx.screen_depth(), at35, 2)
+	print("screen depth at 3,5 and 4,5: ")
+	floats(sd.all(), 0, 2)
+	print("\n")
+	gfx.close()
+	return 0
+}
