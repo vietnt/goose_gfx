@@ -1,0 +1,144 @@
+// A small Clarus program on goose_gfx, headless: worker threads walk a crowd, gfx draws a scene into a texture, ui
+// draws a panel, shapes, text, the crowd and that texture over a second one, and the frame is saved as a PNG. It prints what a run on any GPU backend prints,
+// after the backend's name, so two machines' runs compare line for line.
+//
+//   python clarus/shaders.py clarus/test clarus/shaders
+//   python clarus/native.py out/native
+//   python clarus-lang/compiler/clarusc.py clarus/demo.clarus -o out/demo -I clarus/gfx --link=@out/native/link.rsp
+//   out/demo demo.png
+
+import gfx
+import ui
+import shaders
+
+const W: i64 = 960
+const H: i64 = 540
+const SCALE: f32 = 2.0
+const WORKERS = 4
+const WALKERS = 96
+
+copy struct Walker { id: i64, x: i64, y: i64 }
+shared walked: Chan<Walker, 128>
+
+// The walkers w, w + WORKERS and so on, each where 400 steps of its own seeded random walk end: integer math, so
+// every machine and every order of the threads gives the same crowd.
+fn walk(w: i64) {
+	var k = w
+	while k < WALKERS {
+		var s: u64 = u64(k) * 2654435761 + 12345
+		var x: i64 = 0
+		var y: i64 = 0
+		for step in 0..400 {
+			s = s * 6364136223846793005 + 1442695040888963407
+			let d = i64((s >> 33) % 4)
+			if d == 0 { x += 1 } else if d == 1 { x -= 1 } else if d == 2 { y += 1 } else { y -= 1 }
+		}
+		walked.send(Walker { id: k, x: x, y: y })
+		k += WORKERS
+	}
+}
+
+fn rgba(r: u8, g: u8, b: u8, a: u8) -> ui.Color { return ui.Color { r: r, g: g, b: b, a: a } }
+fn rect(x: f32, y: f32, w: f32, h: f32) -> ui.Rect { return ui.Rect { x: x, y: y, w: w, h: h } }
+
+fn print_text(label: Text, bytes: Slice<u8>) {
+	if let t = Text.from_utf8(bytes) { print("{}{}\n", label, t) }
+}
+
+fn main() -> i32 {
+	if !gfx.open_headless(W, H) {
+		use why = gfx.error()
+		print_text("gfx: ", why.all())
+		return 1
+	}
+	use driver = gfx.driver()
+	print_text("driver: ", driver.all())
+
+	// The crowd, from the worker threads, by id whatever order they finish in.
+	var crowd = [Walker { id: 0, x: 0, y: 0 }; WALKERS]
+	use crew = Array<Thread<void>>.new()
+	for w in 0..WORKERS { crew.push(Thread.spawn(walk, w)) }
+	for i in 0..WALKERS {
+		let v = walked.receive() else { break }
+		crowd[v.id] = v
+	}
+	crew.clear()
+	var sx: i64 = 0
+	var sy: i64 = 0
+	for v in crowd {
+		sx += v.x
+		sy += v.y
+	}
+	print("crowd: {} walkers from {} threads, sum x {} y {}\n", WALKERS, WORKERS, sx, sy)
+
+	// The scene, in gfx: a sky and a sun from a shader with its uniforms.
+	let scene = gfx.render_target(W, H, gfx.RGBA8)
+	let desc = gfx.pipeline_desc()
+	let sky = gfx.pipeline(shaders.demo_vert(), shaders.demo_frag(), desc)
+	gfx.begin_pass_into(scene, gfx.Texture { id: 0 }, gfx.Float4 { x: 0.0, y: 0.0, z: 0.0, w: 1.0 })
+	gfx.bind_pipeline(sky)
+	let sun: [f32; 4] = [0.72, 0.5, f32(W) / f32(H), 0.07]
+	gfx.uniforms(gfx.FRAGMENT, 0, Unsafe.slice(Unsafe.cast(Unsafe.addr(sun[0])), 16))
+	gfx.draw(3)
+	gfx.end_pass()
+
+	// The ui, at twice the pixels of its units, with Nuklear's own font baked at that scale.
+	let atlas = ui.create_font_atlas()
+	let font = ui.add_default_font(atlas, 13.0, ui.font_config())
+	if !ui.bake(atlas, SCALE) {
+		use why = ui.error()
+		print_text("ui: ", why.all())
+		return 1
+	}
+	let cx = ui.create_context(font)
+	ui.set_scale(cx, SCALE)
+	var style = ui.style(cx)
+	style.window.fixed_background = ui.style_item_hide()
+	style.window.padding = ui.UiFloat2 { x: 0.0, y: 0.0 }
+	ui.set_style(cx, style)
+	use r = ui.renderer()
+
+	let uw = f32(W) / SCALE
+	let uh = f32(H) / SCALE
+	if ui.begin(cx, "canvas", rect(0.0, 0.0, uw, uh), ui.WINDOW_NO_SCROLLBAR) {
+		// The scene drawn into the ui as an image, a quarter of it framed in the corner.
+		ui.draw_image(cx, rect(0.0, 0.0, uw, uh), ui.subimage_id(scene.id, u16(W), u16(H), rect(0.0, 0.0, f32(W), f32(H))), rgba(255, 255, 255, 255))
+		ui.fill_rect(cx, rect(16.0, 16.0, 196.0, 92.0), 8.0, rgba(12, 14, 30, 200))
+		ui.stroke_rect(cx, rect(16.0, 16.0, 196.0, 92.0), 8.0, 1.5, rgba(240, 200, 120, 255))
+		let title = "Clarus on goose_gfx"
+		let th = ui.info(font).height
+		ui.draw_text(cx, rect(28.0, 26.0, ui.text_width(font, title.bytes()) + 2.0, th), title.bytes(), font, rgba(0, 0, 0, 0), rgba(255, 236, 200, 255))
+		ui.draw_text(cx, rect(28.0, 26.0 + th + 6.0, 170.0, th), driver.all(), font, rgba(0, 0, 0, 0), rgba(170, 210, 255, 255))
+		let crew_line = "96 walkers, 4 threads"
+		ui.draw_text(cx, rect(28.0, 26.0 + 2.0 * (th + 6.0), ui.text_width(font, crew_line.bytes()) + 2.0, th), crew_line.bytes(), font, rgba(0, 0, 0, 0), rgba(200, 230, 200, 255))
+		ui.fill_circle(cx, rect(28.0, 80.0, 14.0, 14.0), rgba(230, 80, 70, 255))
+		ui.stroke_circle(cx, rect(50.0, 80.0, 14.0, 14.0), 2.0, rgba(120, 220, 140, 255))
+		let flag: [ui.UiFloat2; 3] = [ui.UiFloat2 { x: 74.0, y: 94.0 }, ui.UiFloat2 { x: 81.0, y: 80.0 }, ui.UiFloat2 { x: 88.0, y: 94.0 }]
+		ui.fill_polygon(cx, flag.all(), rgba(250, 210, 90, 255))
+		let colors = [rgba(250, 110, 90, 255), rgba(120, 220, 140, 255), rgba(120, 180, 255, 255), rgba(250, 210, 90, 255)]
+		for v in crowd {
+			let x = uw * 0.42 + f32(v.x) * 4.0
+			let y = uh * 0.8 + f32(v.y) * 1.2
+			ui.fill_circle(cx, rect(x - 2.5, y - 2.5, 5.0, 5.0), colors[v.id % WORKERS])
+		}
+		ui.push_scissor(cx, rect(0.0, 0.0, uw, uh))
+		ui.draw_image(cx, rect(uw - 132.0, uh - 82.0, 120.0, 70.0), ui.subimage_id(scene.id, u16(W), u16(H), rect(f32(W) / 2.0, 0.0, f32(W) / 2.0, f32(H) / 2.0)), rgba(255, 255, 255, 255))
+		ui.stroke_rect(cx, rect(uw - 132.0, uh - 82.0, 120.0, 70.0), 0.0, 1.0, rgba(255, 255, 255, 255))
+	}
+	ui.end(cx)
+
+	let frame = gfx.render_target(W, H, gfx.RGBA8)
+	gfx.begin_pass_into(frame, gfx.Texture { id: 0 }, gfx.Float4 { x: 0.0, y: 0.0, z: 0.0, w: 1.0 })
+	gfx.end_pass()
+	ui.render_into(mut r, cx, frame)
+	ui.clear(cx)
+
+	use px = gfx.read_pixels(frame)
+	print("pixels: {}\n", px.len())
+	if !gfx.save_png(frame, "demo.png") { return 1 }
+	print("saved demo.png\n")
+	ui.destroy(cx)
+	ui.destroy_font_atlas(atlas)
+	gfx.close()
+	return 0
+}
