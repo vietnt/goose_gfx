@@ -17,8 +17,8 @@ import gfx
 // --- errors ------------------------------------------------------------------
 
 // Why the last call that failed did.
-fn error() -> Array<u8> {
-	var text = Array<u8>.filled(1024, 0)
+fn error() -> List<u8> {
+	var text = List<u8>.filled(1024, 0)
 	let n = gsc_ui_error(text.all_mut())
 	text.resize(if n < 1024 { n } else { 1024 })
 	return text
@@ -52,7 +52,7 @@ fn add_font_from_memory(a: FontAtlas, ttf: Slice<u8>, height: f32, config: FontC
 
 // Nuklear's built-in font, a bitmap one at its best at 13 and whole multiples.
 fn add_default_font(a: FontAtlas, height: f32, config: FontConfig) -> Font {
-	use none = Array<u32>.new()
+	use none = List<u32>.new()
 	return gsc_ui_add_default_font(a, height, config, none.all())
 }
 
@@ -135,13 +135,13 @@ struct Renderer {
 	index_buffer: gfx.Buffer,
 	index_capacity: i64,
 	// The textures upload_atlases made, released with their atlases; a 0 is a free slot.
-	textures: Array<u32>,
+	textures: List<u32>,
 }
 
 fn renderer() -> Renderer {
 	var r = Renderer { opened: 0, pipeline: gfx.Pipeline { id: 0 }, sampler: gfx.Sampler { id: 0 },
 		vertex_buffer: gfx.Buffer { id: 0 }, vertex_capacity: 0, index_buffer: gfx.Buffer { id: 0 }, index_capacity: 0,
-		textures: Array<u32>.new() }
+		textures: List<u32>.new() }
 	make_renderer(mut r)
 	return r
 }
@@ -172,7 +172,7 @@ private fn ensure_buffer(mut b: gfx.Buffer, mut capacity: i64, usage: i32, bytes
 	var size: i64 = 4096
 	while size < bytes { size = size * 2 }
 	capacity = size
-	use none = Array<u8>.new()
+	use none = List<u8>.new()
 	b = gfx.buffer(usage, size, none.all())
 }
 
@@ -185,9 +185,9 @@ private fn position(xs: Slice<u32>, x: u32) -> i64 {
 
 // Uploads the image of every baked atlas no texture holds yet, and releases the textures of those destroyed.
 private fn upload_atlases(mut r: Renderer) {
-	use none = Array<u32>.new()
+	use none = List<u32>.new()
 	let n = gsc_ui_released_textures(none.all_mut())
-	use released = Array<u32>.filled(n, 0)
+	use released = List<u32>.filled(n, 0)
 	gsc_ui_released_textures(released.all_mut())
 	for t in released.all() {
 		let i = position(r.textures.all(), t)
@@ -201,7 +201,7 @@ private fn upload_atlases(mut r: Renderer) {
 		if a.id == 0 { break }
 		var size = UiInt2 { x: 0, y: 0 }
 		gsc_ui_font_atlas_size(a, mut size)
-		use px = Array<u8>.filled(i64(size.x) * i64(size.y) * 4, 0)
+		use px = List<u8>.filled(i64(size.x) * i64(size.y) * 4, 0)
 		gsc_ui_font_atlas_pixels(a, px.all_mut())
 		let t = gfx.texture2d(i64(size.x), i64(size.y), gfx.RGBA8, gfx.SAMPLED)
 		let all = gfx.Region { .. }
@@ -221,18 +221,18 @@ fn render_into(mut r: Renderer, c: Context, target: gfx.Texture) {
 	let config = convert_config()
 	gsc_ui_convert(c, config)
 	check()
-	use no_draws = Array<DrawCommand>.new()
+	use no_draws = List<DrawCommand>.new()
 	let nd = gsc_ui_draw_commands(c, no_draws.all_mut())
 	if nd == 0 { return }
-	use draws = Array<DrawCommand>.filled(nd, DrawCommand { .. })
+	use draws = List<DrawCommand>.filled(nd, DrawCommand { .. })
 	gsc_ui_draw_commands(c, draws.all_mut())
-	use no_verts = Array<Vertex>.new()
+	use no_verts = List<Vertex>.new()
 	let nv = gsc_ui_vertices(c, no_verts.all_mut())
-	use verts = Array<Vertex>.filled(nv, Vertex { .. })
+	use verts = List<Vertex>.filled(nv, Vertex { .. })
 	gsc_ui_vertices(c, verts.all_mut())
-	use no_idx = Array<u32>.new()
+	use no_idx = List<u32>.new()
 	let ni = gsc_ui_indices(c, no_idx.all_mut())
-	use idx = Array<u32>.filled(ni, 0)
+	use idx = List<u32>.filled(ni, 0)
 	gsc_ui_indices(c, idx.all_mut())
 	// Plain data as the bytes gfx uploads: Clarus has no generic bytes_of yet, so the cast is written here.
 	let vbytes = nv * i64(size_of(Vertex))

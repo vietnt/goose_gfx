@@ -17,7 +17,7 @@ fn main() -> i32 {
 		return 1
 	}
 	let field = gfx.texture2d(4, 1, gfx.RGBA8, gfx.COMPUTE_WRITE | gfx.SAMPLED)
-	use none = Array<u8>.new()
+	use none = List<u8>.new()
 	let counts = gfx.buffer(gfx.BUFFER_COMPUTE_WRITE, 16, none.all())
 	let write = gfx.compute_pipeline(shaders.cycle_comp())
 	let desc = gfx.pipeline_desc()

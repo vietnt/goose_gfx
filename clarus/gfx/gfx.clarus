@@ -72,10 +72,10 @@ fn text_input(on: bool) { gsc_gfx_text_input(if on { 1 } else { 0 }) }
 fn focused() -> bool { return gsc_gfx_focused() != 0 }
 
 // The input events of the last frame, in the order they came.
-fn events() -> Array<Event> {
-	use none = Array<Event>.new()
+fn events() -> List<Event> {
+	use none = List<Event>.new()
 	let n = gsc_gfx_events(none.all_mut())
-	var out = Array<Event>.filled(n, Event { kind: 0, scancode: 0, keycode: 0, mods: 0, down: 0, repeat: 0,
+	var out = List<Event>.filled(n, Event { kind: 0, scancode: 0, keycode: 0, mods: 0, down: 0, repeat: 0,
 		button: 0, clicks: 0, codepoint: 0, x: 0.0, y: 0.0 })
 	gsc_gfx_events(out.all_mut())
 	return out
@@ -106,8 +106,8 @@ fn close() {
 }
 
 // Why the last call that failed did.
-fn error() -> Array<u8> {
-	var text = Array<u8>.filled(1024, 0)
+fn error() -> List<u8> {
+	var text = List<u8>.filled(1024, 0)
 	let n = gsc_gfx_error(text.all_mut())
 	text.resize(if n < 1024 { n } else { 1024 })
 	return text
@@ -123,8 +123,8 @@ fn check() {
 }
 
 // The GPU backend in use: "vulkan", "direct3d12" or "metal".
-fn driver() -> Array<u8> {
-	var name = Array<u8>.filled(64, 0)
+fn driver() -> List<u8> {
+	var name = List<u8>.filled(64, 0)
 	let n = gsc_gfx_driver(name.all_mut())
 	name.resize(if n < 64 { n } else { 64 })
 	return name
@@ -262,8 +262,8 @@ fn read_buffer_async(b: Buffer, offset: i64, size: i64) -> Readback {
 }
 fn readback_size(r: Readback) -> i64 { return gsc_gfx_readback_size(r) }
 fn ready(r: Readback) -> bool { return gsc_gfx_readback_ready(r) != 0 }
-fn take_readback(r: Readback) -> Array<u8> {
-	var raw = Array<u8>.filled(gsc_gfx_readback_size(r), 0)
+fn take_readback(r: Readback) -> List<u8> {
+	var raw = List<u8>.filled(gsc_gfx_readback_size(r), 0)
 	gsc_gfx_readback_take(r, raw.all_mut())
 	check()
 	return raw
@@ -279,9 +279,9 @@ fn save_png(t: Texture, path: Text) -> bool {
 fn screenshot(path: Text) -> bool { return save_png(screen(), path) }
 
 // The bytes of mip 0 of layer 0, fresh: an RGBA8 texture's pixels, four bytes each, from the top left.
-fn read_pixels(t: Texture) -> Array<u8> {
+fn read_pixels(t: Texture) -> List<u8> {
 	let all = Region { .. }
-	var px = Array<u8>.filled(region_size(t, all), 0)
+	var px = List<u8>.filled(region_size(t, all), 0)
 	read_texture(t, all, px.all_mut())
 	return px
 }

@@ -56,7 +56,7 @@ fn main() -> i32 {
 
 	// The crowd, from the worker threads, by id whatever order they finish in.
 	var crowd = [Walker { id: 0, x: 0, y: 0 }; WALKERS]
-	use crew = Array<Thread<void>>.new()
+	use crew = List<Thread<void>>.new()
 	for w in 0..WORKERS { crew.push(Thread.spawn(walk, w)) }
 	for i in 0..WALKERS {
 		let v = walked.receive() else { break }
