@@ -4,19 +4,101 @@
 // gfx.goose's. A call the program should not have made is counted by the layer and aborts the program at the next
 // check(), frame(), read back or close(), as in Goose.
 //
-// So far it has what test/gfx_smoke.clarus uses. The depth reader of gfx.goose (read_texture on a depth texture)
-// is not ported yet, so reading a depth texture back is refused.
+// It has the functions of gfx.goose that rome_goose calls. Clarus has no overloading (M8), so one name of gfx.goose
+// that takes several forms is several names here: `bind` is bind_pipeline and bind_compute, `release` is
+// release_buffer, release_texture and the like, `sampler(desc)` is sampler_of. Bytes go as Slice<u8>: Clarus
+// cannot take the address of a value of a type parameter yet, so a caller turns its own plain-data slice into bytes.
 
 // A compiled shader of one stage, as clarus/shaders.py writes them (gsc_shader.h).
 extern type VertShader
 extern type FragShader
 extern type CompShader
 private extern fn gsc_gfx_pipeline_of(vs: Ptr<const VertShader>, fs: Ptr<const FragShader>, desc: &PipelineDesc) -> Pipeline
+private extern fn gsc_gfx_compute_pipeline_of(cs: Ptr<const CompShader>) -> ComputePipeline
 
 // --- device ------------------------------------------------------------------
 
 // The device alone, drawing into a screen of width x height that no window shows, or false with error() set.
 fn open_headless(width: i64, height: i64) -> bool { return gsc_gfx_open_headless(width, height, 0) != 0 }
+
+// A window of width x height in the display's own coordinates, and the GPU device, or false with error() set.
+fn open(title: Text, width: i64, height: i64, flags: i64) -> bool {
+	return gsc_gfx_open(title.bytes(), width, height, flags) != 0
+}
+
+// Presents the frame and gathers input; false once the window is asked to close.
+fn frame() -> bool {
+	let running = gsc_gfx_frame() != 0
+	check()
+	return running
+}
+
+// Submits what is recorded and waits for the GPU, with no frame presented.
+fn flush() {
+	gsc_gfx_flush()
+	check()
+}
+
+fn screen() -> Texture { return gsc_gfx_screen() }
+fn screen_depth() -> Texture { return gsc_gfx_screen_depth() }
+fn screen_size() -> Int2 {
+	var size = Int2 { x: 0, y: 0 }
+	gsc_gfx_screen_size(mut size)
+	return size
+}
+fn frame_count() -> i64 { return gsc_gfx_frame_count() }
+fn frames_in_flight() -> i64 { return gsc_gfx_frames_in_flight() }
+fn upload_info() -> UploadInfo {
+	var info = UploadInfo { .. }
+	gsc_gfx_uploads(mut info)
+	return info
+}
+
+// --- input -------------------------------------------------------------------
+
+fn key_down(name: Text) -> bool { return gsc_gfx_key_down(name.bytes()) != 0 }
+fn key_pressed(name: Text) -> bool { return gsc_gfx_key_pressed(name.bytes()) != 0 }
+fn mouse_down(button: i64) -> bool { return gsc_gfx_mouse_down(button) != 0 }
+fn mouse_pressed(button: i64) -> bool { return gsc_gfx_mouse_pressed(button) != 0 }
+fn mouse_released(button: i64) -> bool { return gsc_gfx_mouse_released(button) != 0 }
+fn mouse_pos() -> Float2 {
+	var p = Float2 { x: 0.0, y: 0.0 }
+	gsc_gfx_mouse_pos(mut p)
+	return p
+}
+fn mouse_wheel() -> f32 { return gsc_gfx_mouse_wheel() }
+fn text_input(on: bool) { gsc_gfx_text_input(if on { 1 } else { 0 }) }
+// Keyboard focus, updated at frame(); input while unfocused is ignored. A hidden window starts without it.
+fn focused() -> bool { return gsc_gfx_focused() != 0 }
+
+// The input events of the last frame, in the order they came.
+fn events() -> Array<Event> {
+	use none = Array<Event>.new()
+	let n = gsc_gfx_events(none.all_mut())
+	var out = Array<Event>.filled(n, Event { kind: 0, scancode: 0, keycode: 0, mods: 0, down: 0, repeat: 0,
+		button: 0, clicks: 0, codepoint: 0, x: 0.0, y: 0.0 })
+	gsc_gfx_events(out.all_mut())
+	return out
+}
+
+// Input as a scripted run gives it, taken by the next frame() as if it came from the system.
+fn inject_focus(focused: bool) -> bool { return gsc_gfx_inject_focus(if focused { 1 } else { 0 }) != 0 }
+fn inject_key(name: Text, down: bool) -> bool { return gsc_gfx_inject_key(name.bytes(), if down { 1 } else { 0 }) != 0 }
+fn inject_mouse(x: f32, y: f32, button: i64, down: bool) { gsc_gfx_inject_mouse(x, y, button, if down { 1 } else { 0 }) }
+fn inject_text(text: Text) -> bool { return gsc_gfx_inject_text(text.bytes()) != 0 }
+
+// --- buffers -----------------------------------------------------------------
+
+// A buffer of `size` bytes for BUFFER_* `usage`, starting with `data`, which may be shorter or empty.
+fn buffer(usage: i64, size: i64, data: Slice<u8>) -> Buffer { return gsc_gfx_create_buffer(usage, size, data) }
+fn vertex_buffer(data: Slice<u8>) -> Buffer { return gsc_gfx_create_buffer(BUFFER_VERTEX, data.len(), data) }
+fn update_buffer(b: Buffer, offset: i64, data: Slice<u8>) -> bool {
+	let ok = gsc_gfx_update_buffer(b, offset, data) != 0
+	check()
+	return ok
+}
+fn buffer_size(b: Buffer) -> i64 { return gsc_gfx_buffer_size(b) }
+fn release_buffer(b: Buffer) { gsc_gfx_release_buffer(b) }
 
 fn close() {
 	check()
@@ -35,7 +117,7 @@ fn error() -> Array<u8> {
 fn check() {
 	if gsc_gfx_misuse_count() > 0 {
 		use why = error()
-		if let t = Text.from_utf8(why.all()) { eprint("gfx: {}\n", t) }
+		if let t = Text.from_utf8(why.all()) { eprint("gfx: {}\n", t) } else { eprint("gfx: misuse ({} bytes of error text, not UTF-8)\n", why.len()) }
 		assert(false)
 	}
 }
@@ -51,6 +133,39 @@ fn driver() -> Array<u8> {
 // --- textures ----------------------------------------------------------------
 
 fn texture(desc: &TextureDesc) -> Texture { return gsc_gfx_create_texture(desc) }
+
+// An image file (PNG, or the formats SDL's loader reads) as an RGBA8 texture, with its mips under LOAD_MIPS.
+fn load_texture(path: Text, flags: i64) -> Texture { return gsc_gfx_load_texture(path.bytes(), flags) }
+
+fn texture_info(t: Texture) -> TextureDesc {
+	var d = texture_desc()
+	gsc_gfx_texture_info(t, mut d)
+	return d
+}
+
+// `data` into `region` of `t`, texels row after row as read_texture gives them.
+fn update_texture(t: Texture, region: &Region, data: Slice<u8>) -> bool {
+	let ok = gsc_gfx_update_texture(t, region, data) != 0
+	check()
+	return ok
+}
+
+// Fills mips 1 and up from mip 0. Not inside a pass.
+fn generate_mips(t: Texture) { gsc_gfx_generate_mips(t) }
+fn release_texture(t: Texture) { gsc_gfx_release_texture(t) }
+
+fn sampler_of(desc: &SamplerDesc) -> Sampler { return gsc_gfx_create_sampler(desc) }
+fn sampler(filter: i32, wrap: i32) -> Sampler {
+	var d = sampler_desc()
+	d.min_filter = filter
+	d.mag_filter = filter
+	d.mip_filter = filter
+	d.wrap_u = wrap
+	d.wrap_v = wrap
+	d.wrap_w = wrap
+	return sampler_of(d)
+}
+fn release_sampler(s: Sampler) { gsc_gfx_release_sampler(s) }
 
 fn texture2d(width: i64, height: i64, format: i32, usage: i32) -> Texture {
 	var d = texture_desc()
@@ -73,15 +188,95 @@ fn is_depth(format: i32) -> bool {
 // The bytes `region` of `t` takes as read_texture gives them.
 fn region_size(t: Texture, region: &Region) -> i64 { return gsc_gfx_region_size(t, region) }
 
-// `region` of a color texture into `out`, region_size bytes.
+// `region` of `t` into `out`, region_size bytes. A depth texture reads back as one f32 a texel, D16 and D24
+// normalized to 0..1, from any mip of a 2D texture, an array layer or a cube face: SDL_GPU cannot download depth on
+// every backend, so it is drawn into an R32F target first.
 fn read_texture(t: Texture, region: &Region, out: SliceMut<u8>) -> bool {
-	var info = texture_desc()
-	gsc_gfx_texture_info(t, mut info)
-	assert(!is_depth(info.format))
-	let ok = gsc_gfx_read_texture(t, region, out) != 0
+	let target = depth_copy(t, region, out.len())
+	let all = Region { .. }
+	let ok = if target.id != 0 { gsc_gfx_read_texture(target, all, out) != 0 } else { gsc_gfx_read_texture(t, region, out) != 0 }
+	if target.id != 0 { release_texture(target) }
 	check()
 	return ok
 }
+
+fn open_count() -> i64 { return gsc_gfx_open_count() }
+
+// An R32F texture holding `region` of depth texture `t`, drawn into it in the command buffer being recorded, to be
+// read as `bytes` bytes (-1: any); Texture { id: 0 } when `t` is not a depth texture this can read, which the read back then
+// reports. The region's origin, layer and mip come from vertex buffer 0, not as uniforms, so the uniforms the program
+// pushed stay as they were. A cube face is sampled at its texels' centres. Its pipeline is made for the one read and
+// released after it: gfx.goose keeps them in a global, which a Clarus module has only as a root that every caller
+// binds, and a depth read back is rare enough not to need one.
+private fn depth_copy(t: Texture, region: &Region, bytes: i64) -> Texture {
+	let info = texture_info(t)
+	let kind = if info.kind == TEXTURE_2D { 0 } else if info.kind == TEXTURE_2D_ARRAY { 1 } else if info.kind == TEXTURE_CUBE { 2 } else { -1 }
+	let layers = if kind == 1 { info.depth } else if kind == 2 { 6 } else { 1 }
+	if !is_depth(info.format) || kind < 0 || info.samples != 1 || (info.usage & SAMPLED) == 0 || region.mip < 0 || region.mip >= info.mips || region.layer < 0 || region.layer >= layers {
+		return Texture { id: 0 }
+	}
+	let mw = if info.width >> region.mip > 0 { info.width >> region.mip } else { 1 }
+	let mh = if info.height >> region.mip > 0 { info.height >> region.mip } else { 1 }
+	let w = if region.w == 0 { mw } else { region.w }
+	let h = if region.w == 0 { mh } else if region.h == 0 { 1 } else { region.h }
+	let x = if region.w == 0 { 0 } else { region.x }
+	let y = if region.w == 0 { 0 } else { region.y }
+	if x < 0 || y < 0 || w < 1 || h < 1 || x + w > mw || y + h > mh || (bytes >= 0 && bytes != 4 * i64(w) * i64(h)) {
+		return Texture { id: 0 }
+	}
+	let fs = if kind == 0 { depth_2d_frag() } else if kind == 1 { depth_array_frag() } else { depth_cube_frag() }
+	let desc = pipeline_desc()
+	let p = pipeline(depth_vert(), fs, desc)
+	let smp = sampler(NEAREST, CLAMP)
+	let at_each: [i32; 12] = [x, y, region.layer, region.mip, x, y, region.layer, region.mip, x, y, region.layer, region.mip]
+	let at_bytes: Slice<u8> = Unsafe.slice(Unsafe.cast(Unsafe.addr(at_each[0])), 48)
+	let at = gsc_gfx_create_buffer(BUFFER_VERTEX, 48, at_bytes)
+	let target = render_target(i64(w), i64(h), R32F)
+	begin_pass_into(target, Texture { id: 0 }, Float4 { x: 0.0, y: 0.0, z: 0.0, w: 0.0 })
+	bind_pipeline(p)
+	bind_vertex_buffer(0, at, 0)
+	bind_texture(FRAGMENT, 0, t, smp)
+	draw(3)
+	end_pass()
+	release_buffer(at)
+	release_pipeline(p)
+	release_sampler(smp)
+	return target
+}
+
+// A read back that does not wait: frame() or flush() submits it, ready() says when the GPU has done it, and take_readback()
+// gives its bytes and frees it.
+fn read_texture_async(t: Texture, region: &Region) -> Readback {
+	let target = depth_copy(t, region, -1)
+	let all = Region { .. }
+	let r = if target.id != 0 { gsc_gfx_read_texture_async(target, all) } else { gsc_gfx_read_texture_async(t, region) }
+	if target.id != 0 { release_texture(target) }
+	check()
+	return r
+}
+// `size` bytes of `b` from `offset`, as the buffer holds them here in program order.
+fn read_buffer_async(b: Buffer, offset: i64, size: i64) -> Readback {
+	let r = gsc_gfx_read_buffer_async(b, offset, size)
+	check()
+	return r
+}
+fn readback_size(r: Readback) -> i64 { return gsc_gfx_readback_size(r) }
+fn ready(r: Readback) -> bool { return gsc_gfx_readback_ready(r) != 0 }
+fn take_readback(r: Readback) -> Array<u8> {
+	var raw = Array<u8>.filled(gsc_gfx_readback_size(r), 0)
+	gsc_gfx_readback_take(r, raw.all_mut())
+	check()
+	return raw
+}
+fn release_readback(r: Readback) { gsc_gfx_release_readback(r) }
+
+// An RGBA8 or BGRA8 texture's mip 0 as a PNG file; the screen as it is shown, opaque.
+fn save_png(t: Texture, path: Text) -> bool {
+	let ok = gsc_gfx_save_png(t, path.bytes()) != 0
+	check()
+	return ok
+}
+fn screenshot(path: Text) -> bool { return save_png(screen(), path) }
 
 // The bytes of mip 0 of layer 0, fresh: an RGBA8 texture's pixels, four bytes each, from the top left.
 fn read_pixels(t: Texture) -> Array<u8> {
@@ -97,6 +292,11 @@ fn pipeline(vs: Ptr<const VertShader>, fs: Ptr<const FragShader>, desc: &Pipelin
 	return gsc_gfx_pipeline_of(vs, fs, desc)
 }
 
+fn release_pipeline(p: Pipeline) { gsc_gfx_release_pipeline(p) }
+
+fn compute_pipeline(cs: Ptr<const CompShader>) -> ComputePipeline { return gsc_gfx_compute_pipeline_of(cs) }
+fn release_compute_pipeline(p: ComputePipeline) { gsc_gfx_release_compute_pipeline(p) }
+
 fn begin_pass(desc: &PassDesc) -> bool { return gsc_gfx_begin_pass(desc) != 0 }
 
 // Into one target, with a depth target or Texture { id: 0 }, cleared to `clear`.
@@ -108,8 +308,39 @@ fn begin_pass_into(target: Texture, depth: Texture, clear: Float4) -> bool {
 	return begin_pass(d)
 }
 
+// Into the screen and its depth, cleared to `clear`.
+fn begin_screen(clear: Float4) -> bool { return begin_pass_into(screen(), screen_depth(), clear) }
+
 fn end_pass() { gsc_gfx_end_pass() }
+
+// A compute pass, writing `rw_buffers` and `rw_textures`; with `cycle`, what it writes starts undefined.
+fn begin_compute(rw_buffers: Slice<Buffer>, rw_textures: Slice<Texture>, cycle: bool) -> bool {
+	return gsc_gfx_begin_compute(rw_buffers, rw_textures, if cycle { 1 } else { 0 }) != 0
+}
+fn end_compute() { gsc_gfx_end_compute() }
+fn bind_compute(p: ComputePipeline) { gsc_gfx_bind_compute_pipeline(p) }
+fn dispatch(x: i64, y: i64, z: i64) { gsc_gfx_dispatch(x, y, z) }
+
+// Vertex buffer 0 per vertex, 1 per instance (PipelineDesc.instance_location).
+fn bind_vertex_buffer(slot: i64, b: Buffer, offset: i64) { gsc_gfx_bind_vertex_buffer(slot, b, offset) }
+// A sampler binding of `stage`, in a render pass, or a compute pass for COMPUTE.
+fn bind_texture(stage: i64, slot: i64, t: Texture, s: Sampler) { gsc_gfx_bind_texture(stage, slot, t, s) }
+// A uniform block's bytes, std140, for the draws or dispatches that follow.
+fn uniforms(stage: i64, slot: i64, data: Slice<u8>) { gsc_gfx_push_uniforms(stage, slot, data) }
 
 fn bind_pipeline(p: Pipeline) { gsc_gfx_bind_pipeline(p) }
 
 fn draw(vertices: i64) { gsc_gfx_draw(vertices, 1, 0, 0) }
+fn draw_instanced(vertices: i64, instances: i64) { gsc_gfx_draw(vertices, instances, 0, 0) }
+// From vertex `first_vertex` and instance `first_instance` (SV_InstanceID and gl_InstanceIndex start at it).
+fn draw_at(vertices: i64, instances: i64, first_vertex: i64, first_instance: i64) {
+	gsc_gfx_draw(vertices, instances, first_vertex, first_instance)
+}
+fn draw_indexed(indices: i64, instances: i64, first_index: i64, vertex_offset: i64) {
+	gsc_gfx_draw_indexed(indices, instances, first_index, vertex_offset, 0)
+}
+// The index buffer for draw_indexed, of 2- or 4-byte indices.
+fn bind_index_buffer(b: Buffer, index_size: i64, offset: i64) { gsc_gfx_bind_index_buffer(b, index_size, offset) }
+// Draws only inside x, y, w, h of the target, in pixels from the top left, until the pass ends.
+fn scissor(x: i64, y: i64, w: i64, h: i64) { gsc_gfx_scissor(x, y, w, h) }
+fn viewport(x: f32, y: f32, w: f32, h: f32) { gsc_gfx_viewport(x, y, w, h) }
