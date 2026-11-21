@@ -1,0 +1,31 @@
+// test/gfx/gfx_smoke.goose in Clarus: a target cleared and drawn into, read back exactly. It prints the line of
+// test/gfx/gfx_smoke.out, after the GPU backend it ran on.
+//
+//   python clarus/shaders.py clarus/test clarus/shaders
+//   python clarus/native.py out/native
+//   python clarus-lang/compiler/clarusc.py clarus/gfx_smoke.clarus -o out/gfx_smoke --link=@out/native/link.rsp
+
+import gfx
+import shaders
+
+fn main() -> i32 {
+	if !gfx.open_headless(8, 8) {
+		use why = gfx.error()
+		if let t = Text.from_utf8(why.all()) { eprint("gfx: {}\n", t) }
+		return 1
+	}
+	let target = gfx.render_target(2, 1, gfx.RGBA8)
+	// The left pixel only: x from -1 to 0 in clip space.
+	let desc = gfx.pipeline_desc()
+	let p = gfx.pipeline(shaders.smoke_vert(), shaders.smoke_frag(), desc)
+	gfx.begin_pass_into(target, gfx.Texture { id: 0 }, gfx.Float4 { x: 1.0, y: 0.0, z: 0.2, w: 1.0 })
+	gfx.bind_pipeline(p)
+	gfx.draw(3)
+	gfx.end_pass()
+	use px = gfx.read_pixels(target)
+	use driver = gfx.driver()
+	if let t = Text.from_utf8(driver.all()) { print("driver: {}\n", t) }
+	print("drawn, cleared: {},{},{},{} {},{},{},{}\n", px[0], px[1], px[2], px[3], px[4], px[5], px[6], px[7])
+	gfx.close()
+	return 0
+}

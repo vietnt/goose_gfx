@@ -1,0 +1,115 @@
+// The module gfx for Clarus: graphics on SDL3's GPU API through this package's C layer (src/gfx/), the same
+// layer gfx.goose declares. api.clarus beside this file is generated from src/gfx/gfx_api.h (clarus/gen.py) and
+// holds the structs, constants and the private externs; this file holds the functions a program calls, after
+// gfx.goose's. A call the program should not have made is counted by the layer and aborts the program at the next
+// check(), frame(), read back or close(), as in Goose.
+//
+// So far it has what test/gfx_smoke.clarus uses. The depth reader of gfx.goose (read_texture on a depth texture)
+// is not ported yet, so reading a depth texture back is refused.
+
+// A compiled shader of one stage, as clarus/shaders.py writes them (gsc_shader.h).
+extern type VertShader
+extern type FragShader
+extern type CompShader
+private extern fn gsc_gfx_pipeline_of(vs: Ptr<const VertShader>, fs: Ptr<const FragShader>, desc: &PipelineDesc) -> Pipeline
+
+// --- device ------------------------------------------------------------------
+
+// The device alone, drawing into a screen of width x height that no window shows, or false with error() set.
+fn open_headless(width: i64, height: i64) -> bool { return gsc_gfx_open_headless(width, height, 0) != 0 }
+
+fn close() {
+	check()
+	gsc_gfx_close()
+}
+
+// Why the last call that failed did.
+fn error() -> Array<u8> {
+	var text = Array<u8>.filled(1024, 0)
+	let n = gsc_gfx_error(text.all_mut())
+	text.resize(if n < 1024 { n } else { 1024 })
+	return text
+}
+
+// Aborts, saying why, if the program has used gfx wrongly.
+fn check() {
+	if gsc_gfx_misuse_count() > 0 {
+		use why = error()
+		if let t = Text.from_utf8(why.all()) { eprint("gfx: {}\n", t) }
+		assert(false)
+	}
+}
+
+// The GPU backend in use: "vulkan", "direct3d12" or "metal".
+fn driver() -> Array<u8> {
+	var name = Array<u8>.filled(64, 0)
+	let n = gsc_gfx_driver(name.all_mut())
+	name.resize(if n < 64 { n } else { 64 })
+	return name
+}
+
+// --- textures ----------------------------------------------------------------
+
+fn texture(desc: &TextureDesc) -> Texture { return gsc_gfx_create_texture(desc) }
+
+fn texture2d(width: i64, height: i64, format: i32, usage: i32) -> Texture {
+	var d = texture_desc()
+	d.format = format
+	d.usage = usage
+	d.width = i32(width)
+	d.height = i32(height)
+	return texture(d)
+}
+
+// A texture to draw into and then sample.
+fn render_target(width: i64, height: i64, format: i32) -> Texture {
+	return texture2d(width, height, format, COLOR_TARGET | SAMPLED)
+}
+
+fn is_depth(format: i32) -> bool {
+	return (format >= DEPTH16 && format <= DEPTH) || format == DEPTH32F_STENCIL8 || format == DEPTH_STENCIL
+}
+
+// The bytes `region` of `t` takes as read_texture gives them.
+fn region_size(t: Texture, region: &Region) -> i64 { return gsc_gfx_region_size(t, region) }
+
+// `region` of a color texture into `out`, region_size bytes.
+fn read_texture(t: Texture, region: &Region, out: SliceMut<u8>) -> bool {
+	var info = texture_desc()
+	gsc_gfx_texture_info(t, mut info)
+	assert(!is_depth(info.format))
+	let ok = gsc_gfx_read_texture(t, region, out) != 0
+	check()
+	return ok
+}
+
+// The bytes of mip 0 of layer 0, fresh: an RGBA8 texture's pixels, four bytes each, from the top left.
+fn read_pixels(t: Texture) -> Array<u8> {
+	let all = Region { .. }
+	var px = Array<u8>.filled(region_size(t, all), 0)
+	read_texture(t, all, px.all_mut())
+	return px
+}
+
+// --- pipelines and passes -------------------------------------------------------
+
+fn pipeline(vs: Ptr<const VertShader>, fs: Ptr<const FragShader>, desc: &PipelineDesc) -> Pipeline {
+	return gsc_gfx_pipeline_of(vs, fs, desc)
+}
+
+fn begin_pass(desc: &PassDesc) -> bool { return gsc_gfx_begin_pass(desc) != 0 }
+
+// Into one target, with a depth target or Texture { id: 0 }, cleared to `clear`.
+fn begin_pass_into(target: Texture, depth: Texture, clear: Float4) -> bool {
+	var d = pass_desc()
+	d.color[0] = target
+	d.depth = depth
+	d.color_value = clear
+	return begin_pass(d)
+}
+
+fn end_pass() { gsc_gfx_end_pass() }
+
+fn bind_pipeline(p: Pipeline) { gsc_gfx_bind_pipeline(p) }
+
+fn draw(vertices: i64) { gsc_gfx_draw(vertices, 1, 0, 0) }

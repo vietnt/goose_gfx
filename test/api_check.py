@@ -259,4 +259,8 @@ if __name__ == "__main__":
                                    f"{Path(MODULES[module][0]).name} and "
                                    f"{Path(MODULES[module][1]).name} agree"))
         status |= 1 if found else 0
+    # The Clarus side of gfx is generated from the same header (clarus/gen.py).
+    if "gfx" in (sys.argv[1:] or MODULES):
+        import subprocess
+        status |= subprocess.run([sys.executable, str(REPO / "clarus" / "gen.py"), "--check"]).returncode
     sys.exit(status)

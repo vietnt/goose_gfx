@@ -1,1 +1,4 @@
 build
+# Written by clarus/shaders.py for clarus/gfx_smoke.clarus.
+/clarus/shaders/
+__pycache__/
