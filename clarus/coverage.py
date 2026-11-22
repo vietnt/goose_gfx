@@ -35,7 +35,7 @@ def defined(module):
     """{name: number of parameters} of the module's functions."""
     names = {}
     for f in (HERE / module).glob("*.clarus"):
-        for name, params in re.findall(r"^fn (\w+)\((.*?)\)", f.read_text(), re.M):
+        for name, params in re.findall(r"^fn (\w+)(?:<[^>]*>)?\((.*?)\)", f.read_text(), re.M):
             names[name] = len([p for p in params.split(",") if p.strip()])
     return names
 

@@ -31,7 +31,7 @@ fn main() -> i32 {
 		gfx.begin_compute(bufs.all(), texs.all(), true)
 		gfx.bind_compute(write)
 		let value: [u32; 4] = [u32(10 * (f + 1)), 0, 0, 0]
-		gfx.uniforms(gfx.COMPUTE, 0, Unsafe.slice(Unsafe.cast(Unsafe.addr(value[0])), 16))
+		gfx.uniforms(gfx.COMPUTE, 0, value)
 		gfx.dispatch(1, 1, 1)
 		gfx.end_compute()
 		gfx.begin_pass_into(targets[f], gfx.Texture { id: 0 }, gfx.Float4 { x: 0.0, y: 0.0, z: 0.0, w: 0.0 })

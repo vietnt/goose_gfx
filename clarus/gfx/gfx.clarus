@@ -6,8 +6,8 @@
 //
 // It has the functions of gfx.goose that rome_goose calls. Clarus has no overloading (M8), so one name of gfx.goose
 // that takes several forms is several names here: `bind` is bind_pipeline and bind_compute, `release` is
-// release_buffer, release_texture and the like, `sampler(desc)` is sampler_of. Bytes go as Slice<u8>: Clarus
-// cannot take the address of a value of a type parameter yet, so a caller turns its own plain-data slice into bytes.
+// release_buffer, release_texture and the like, `sampler(desc)` is sampler_of. Uploads, read backs and uniforms take
+// any plain data, as gfx.goose's do through bytes_of: a slice of it, or one value for uniforms.
 
 // A compiled shader of one stage, as clarus/shaders.py writes them (gsc_shader.h).
 extern type VertShader
@@ -90,10 +90,13 @@ fn inject_text(text: Text) -> bool { return gsc_gfx_inject_text(text.bytes()) !=
 // --- buffers -----------------------------------------------------------------
 
 // A buffer of `size` bytes for BUFFER_* `usage`, starting with `data`, which may be shorter or empty.
-fn buffer(usage: i64, size: i64, data: Slice<u8>) -> Buffer { return gsc_gfx_create_buffer(usage, size, data) }
-fn vertex_buffer(data: Slice<u8>) -> Buffer { return gsc_gfx_create_buffer(BUFFER_VERTEX, data.len(), data) }
-fn update_buffer(b: Buffer, offset: i64, data: Slice<u8>) -> bool {
-	let ok = gsc_gfx_update_buffer(b, offset, data) != 0
+fn buffer<T: plain>(usage: i64, size: i64, data: Slice<T>) -> Buffer { return gsc_gfx_create_buffer(usage, size, bytes_of(data)) }
+fn vertex_buffer<T: plain>(data: Slice<T>) -> Buffer {
+	let bytes = bytes_of(data)
+	return gsc_gfx_create_buffer(BUFFER_VERTEX, bytes.len(), bytes)
+}
+fn update_buffer<T: plain>(b: Buffer, offset: i64, data: Slice<T>) -> bool {
+	let ok = gsc_gfx_update_buffer(b, offset, bytes_of(data)) != 0
 	check()
 	return ok
 }
@@ -188,10 +191,17 @@ fn is_depth(format: i32) -> bool {
 // The bytes `region` of `t` takes as read_texture gives them.
 fn region_size(t: Texture, region: &Region) -> i64 { return gsc_gfx_region_size(t, region) }
 
-// `region` of `t` into `out`, region_size bytes. A depth texture reads back as one f32 a texel, D16 and D24
+// `region` of `t` into `out`, whose elements of any plain type take region_size bytes. A depth texture reads back as one f32 a texel, D16 and D24
 // normalized to 0..1, from any mip of a 2D texture, an array layer or a cube face: SDL_GPU cannot download depth on
 // every backend, so it is drawn into an R32F target first.
-fn read_texture(t: Texture, region: &Region, out: SliceMut<u8>) -> bool {
+fn read_texture<T: plain>(t: Texture, region: &Region, out: SliceMut<T>) -> bool {
+	if out.is_empty() {
+		use none = List<u8>.new()
+		return read_bytes(t, region, none.all_mut())
+	}
+	return read_bytes(t, region, Unsafe.slice(Unsafe.cast(Unsafe.addr(out[0])), out.len() * i64(size_of(T))))
+}
+private fn read_bytes(t: Texture, region: &Region, out: SliceMut<u8>) -> bool {
 	let target = depth_copy(t, region, out.len())
 	let all = Region { .. }
 	let ok = if target.id != 0 { gsc_gfx_read_texture(target, all, out) != 0 } else { gsc_gfx_read_texture(t, region, out) != 0 }
@@ -229,8 +239,7 @@ private fn depth_copy(t: Texture, region: &Region, bytes: i64) -> Texture {
 	let p = pipeline(depth_vert(), fs, desc)
 	let smp = sampler(NEAREST, CLAMP)
 	let at_each: [i32; 12] = [x, y, region.layer, region.mip, x, y, region.layer, region.mip, x, y, region.layer, region.mip]
-	let at_bytes: Slice<u8> = Unsafe.slice(Unsafe.cast(Unsafe.addr(at_each[0])), 48)
-	let at = gsc_gfx_create_buffer(BUFFER_VERTEX, 48, at_bytes)
+	let at = vertex_buffer(at_each.all())
 	let target = render_target(i64(w), i64(h), R32F)
 	begin_pass_into(target, Texture { id: 0 }, Float4 { x: 0.0, y: 0.0, z: 0.0, w: 0.0 })
 	bind_pipeline(p)
@@ -325,8 +334,17 @@ fn dispatch(x: i64, y: i64, z: i64) { gsc_gfx_dispatch(x, y, z) }
 fn bind_vertex_buffer(slot: i64, b: Buffer, offset: i64) { gsc_gfx_bind_vertex_buffer(slot, b, offset) }
 // A sampler binding of `stage`, in a render pass, or a compute pass for COMPUTE.
 fn bind_texture(stage: i64, slot: i64, t: Texture, s: Sampler) { gsc_gfx_bind_texture(stage, slot, t, s) }
-// A uniform block's bytes, std140, for the draws or dispatches that follow.
-fn uniforms(stage: i64, slot: i64, data: Slice<u8>) { gsc_gfx_push_uniforms(stage, slot, data) }
+// A uniform block, std140, for the draws or dispatches that follow: any plain struct or fixed array.
+fn uniforms<T: plain>(stage: i64, slot: i64, u: T) {
+	gsc_gfx_push_uniforms(stage, slot, Unsafe.slice(Unsafe.cast(Unsafe.addr(u)), i64(size_of(T))))
+}
+
+// The bytes of plain data, as the GPU reads them (X24).
+fn bytes_of<T: plain>(xs: Slice<T>) -> Slice<u8> {
+	if xs.is_empty() { return NO_BYTES.all().slice(0, 0) }
+	return Unsafe.slice(Unsafe.cast(Unsafe.addr(xs[0])), xs.len() * i64(size_of(T)))
+}
+private const NO_BYTES: [u8; 1] = [0]
 
 fn bind_pipeline(p: Pipeline) { gsc_gfx_bind_pipeline(p) }
 

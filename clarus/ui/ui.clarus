@@ -234,15 +234,10 @@ fn render_into(mut r: Renderer, c: Context, target: gfx.Texture) {
 	let ni = gsc_ui_indices(c, no_idx.all_mut())
 	use idx = List<u32>.filled(ni, 0)
 	gsc_ui_indices(c, idx.all_mut())
-	// Plain data as the bytes gfx uploads: Clarus has no generic bytes_of yet, so the cast is written here.
-	let vbytes = nv * i64(size_of(Vertex))
-	let ibytes = ni * 4
-	let vdata: Slice<u8> = Unsafe.slice(Unsafe.cast(Unsafe.addr(verts[0])), vbytes)
-	let idata: Slice<u8> = Unsafe.slice(Unsafe.cast(Unsafe.addr(idx[0])), ibytes)
-	ensure_buffer(mut r.vertex_buffer, mut r.vertex_capacity, gfx.BUFFER_VERTEX, vbytes)
-	ensure_buffer(mut r.index_buffer, mut r.index_capacity, gfx.BUFFER_INDEX, ibytes)
-	gfx.update_buffer(r.vertex_buffer, 0, vdata)
-	gfx.update_buffer(r.index_buffer, 0, idata)
+	ensure_buffer(mut r.vertex_buffer, mut r.vertex_capacity, gfx.BUFFER_VERTEX, nv * i64(size_of(Vertex)))
+	ensure_buffer(mut r.index_buffer, mut r.index_capacity, gfx.BUFFER_INDEX, ni * 4)
+	gfx.update_buffer(r.vertex_buffer, 0, verts.all())
+	gfx.update_buffer(r.index_buffer, 0, idx.all())
 	let info = gfx.texture_info(target)
 	var pass = gfx.pass_desc()
 	pass.clear_color = 0
@@ -253,7 +248,7 @@ fn render_into(mut r: Renderer, c: Context, target: gfx.Texture) {
 	gfx.bind_vertex_buffer(0, r.vertex_buffer, 0)
 	gfx.bind_index_buffer(r.index_buffer, 4, 0)
 	let size: [f32; 4] = [f32(info.width), f32(info.height), 0.0, 0.0]
-	gfx.uniforms(gfx.VERTEX, 0, Unsafe.slice(Unsafe.cast(Unsafe.addr(size[0])), 16))
+	gfx.uniforms(gfx.VERTEX, 0, size)
 	var first: i64 = 0
 	for d in draws.all() {
 		// Scissors in whole pixels, inside the target.

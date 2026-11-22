@@ -78,7 +78,7 @@ fn main() -> i32 {
 	gfx.begin_pass_into(scene, gfx.Texture { id: 0 }, gfx.Float4 { x: 0.0, y: 0.0, z: 0.0, w: 1.0 })
 	gfx.bind_pipeline(sky)
 	let sun: [f32; 4] = [0.72, 0.5, f32(W) / f32(H), 0.07]
-	gfx.uniforms(gfx.FRAGMENT, 0, Unsafe.slice(Unsafe.cast(Unsafe.addr(sun[0])), 16))
+	gfx.uniforms(gfx.FRAGMENT, 0, sun)
 	gfx.draw(3)
 	gfx.end_pass()
 

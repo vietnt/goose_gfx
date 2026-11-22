@@ -27,8 +27,6 @@ fn clear(t: gfx.Texture, c: gfx.Float4) {
 	gfx.end_pass()
 }
 
-fn bytes4(xs: &[u32; 4]) -> Slice<u8> { return Unsafe.slice(Unsafe.cast(Unsafe.addr(xs[0])), 16) }
-
 fn main() -> i32 {
 	if !gfx.open_headless(8, 8) {
 		use why = gfx.error()
@@ -55,10 +53,10 @@ fn main() -> i32 {
 
 	// A buffer: asked for, then overwritten; flush() submits it.
 	let values: [u32; 4] = [10, 20, 30, 40]
-	let buf = gfx.buffer(gfx.BUFFER_VERTEX, 16, bytes4(values))
+	let buf = gfx.buffer(gfx.BUFFER_VERTEX, 16, values.all())
 	let middle = gfx.read_buffer_async(buf, 4, 8)
 	let overwrite: [u32; 4] = [1, 2, 3, 4]
-	gfx.update_buffer(buf, 0, bytes4(overwrite))
+	gfx.update_buffer(buf, 0, overwrite.all())
 	print("buffer before flush: ready {}\n", gfx.ready(middle))
 	gfx.flush()
 	print("buffer after flush: ready {}\n", gfx.ready(middle))
@@ -102,9 +100,9 @@ fn main() -> i32 {
 	gfx.begin_pass(pass)
 	gfx.bind_pipeline(draw_rect)
 	let color: [f32; 4] = [0.2, 0.6, 1.0, 1.0]
-	gfx.uniforms(gfx.FRAGMENT, 0, Unsafe.slice(Unsafe.cast(Unsafe.addr(color[0])), 16))
+	gfx.uniforms(gfx.FRAGMENT, 0, color)
 	let rect: [f32; 8] = [0.0, 0.0, 1.0, 1.0, 0.25, 2.0, 1.0, 0.0]
-	gfx.uniforms(gfx.VERTEX, 0, Unsafe.slice(Unsafe.cast(Unsafe.addr(rect[0])), 32))
+	gfx.uniforms(gfx.VERTEX, 0, rect)
 	gfx.draw(6)
 	gfx.end_pass()
 	let depths = gfx.read_texture_async(depth, all)
