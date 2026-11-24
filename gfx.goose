@@ -520,6 +520,12 @@ fn screen_size() -> int2 {
     screen_size_into(size);
     size
 }
+// At most long_edge pixels on the screen's long side (0: no cap), the window's
+// pixels scaled down to fit and the screen scaled back up as it is shown: for
+// a device short of memory. Set before open(); kept until changed.
+extern "gs_gfx_cap_screen" fn cap_screen(long_edge: i64);
+// The screen's pixels per pixel of the window: 1 but under cap_screen().
+extern "gs_gfx_screen_scale" fn screen_scale() -> f64;
 
 extern "gs_gfx_time" fn time() -> f64;               // seconds since open
 extern "gs_gfx_delta_time" fn delta_time() -> f64;   // seconds the last frame took

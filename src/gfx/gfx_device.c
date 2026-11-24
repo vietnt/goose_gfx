@@ -451,6 +451,25 @@ static bool gfx_screen_texture(gs_gfx_texture *h, SDL_GPUTextureFormat format, u
     return true;
 }
 
+/* cap_screen(): the screen's long side at most this many pixels (0: no cap),
+   and the screen's size over the window's, which the cap makes less than 1.
+   Outside gfx, which close() clears, so a cap set before open() holds. */
+static int gfx_cap;
+static double gfx_scale = 1.0;
+
+/* A window's w x h pixels as the screen has them: scaled down to the cap. */
+static void gfx_fit(int *w, int *h) {
+    int edge = *w > *h ? *w : *h;
+    if (gfx_cap <= 0 || edge <= gfx_cap) return;
+    double f = (double)gfx_cap / edge;
+    *w = (int)(*w * f + 0.5);
+    *h = (int)(*h * f + 0.5);
+}
+
+void gs_gfx_cap_screen(int64_t long_edge) { gfx_cap = long_edge > 0 ? (int)long_edge : 0; }
+
+double gs_gfx_screen_scale(void) { return gfx_scale; }
+
 bool gfx_create_screen(int w, int h) {
     if (w < 1) w = 1;
     if (h < 1) h = 1;
@@ -528,6 +547,7 @@ static void gfx_update_input_scale(void) {
         !SDL_GetWindowSizeInPixels(gfx.window, &pw, &ph) || w <= 0 || h <= 0 || pw <= 0 ||
         ph <= 0)
         return;
+    gfx_fit(&pw, &ph);
     gfx.window_w = w;
     gfx.window_h = h;
     gfx.window_pw = pw;
@@ -707,6 +727,9 @@ static bool gfx_start(bool windowed, gs_gfx_bytes title, int64_t width, int64_t 
         gfx_update_input_scale();
         gfx_seed_mouse();
     }
+    int full_w = pw;
+    gfx_fit(&pw, &ph);
+    gfx_scale = (double)pw / full_w;
     /* Headless programs start focused so their ordinary input loop runs. */
     gfx.focused = !gfx.window || (SDL_GetWindowFlags(gfx.window) & SDL_WINDOW_INPUT_FOCUS) != 0;
     gfx.cursor_visible = true;
@@ -1120,7 +1143,12 @@ static uint8_t gfx_frame_end(const char *name, bool held, double wait) {
     if (resized && gfx.window) {
         int w = 0, h = 0;
         SDL_GetWindowSizeInPixels(gfx.window, &w, &h);
-        if (w > 0 && h > 0 && (w != gfx.width || h != gfx.height)) gfx_create_screen(w, h);
+        int full_w = w;
+        gfx_fit(&w, &h);
+        if (w > 0 && h > 0 && (w != gfx.width || h != gfx.height)) {
+            gfx_scale = (double)w / full_w;
+            gfx_create_screen(w, h);
+        }
     }
     uint64_t now = SDL_GetTicksNS();
     gfx.delta = (double)(now - gfx.last_ns) / 1e9;
